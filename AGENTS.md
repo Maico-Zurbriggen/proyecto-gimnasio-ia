@@ -2,7 +2,9 @@
 
 ## Contexto
 
-Este repositorio contiene los procesos batch Python de análisis y machine learning. La API Express y el frontend React viven en repositorios independientes. Antes de implementar una tarea, consultar el documento funcional correspondiente en `docs/`.
+Este repositorio contiene los procesos batch Python de análisis y machine learning. La API Express y el frontend React viven en repositorios independientes.
+
+La documentación canónica vive en `Maico-Zurbriggen/proyecto-gimnasio-documentacion`. Cuando los repositorios están clonados como carpetas hermanas, leer primero `../proyecto-gimnasio-documentacion/AGENTS.md` y usar su `manifest.json` para seleccionar el contexto de la tarea. Si no está disponible localmente, consultar su versión en GitHub; no reconstruir reglas por memoria ni copiar documentación a este repositorio.
 
 ## Responsabilidad
 
@@ -21,13 +23,14 @@ Este repositorio contiene los procesos batch Python de análisis y machine learn
 - Fijar seeds, versiones, parámetros y artefactos necesarios para reproducir resultados.
 - No usar datos personales reales ni subir datasets sensibles, modelos grandes o notebooks con salidas privadas.
 - Los notebooks son exploratorios; la lógica aceptada debe migrar a módulos y tests.
-- Nombrar conceptos con los términos literales de `docs/D2-glosario.md`.
+- Nombrar conceptos con los términos literales de `product/glossary.md` del repositorio documental.
 
 ## Forma de trabajo
 
 - Crear ramas desde `develop`; todo cambio entra por pull request.
 - Usar Conventional Commits en inglés: `type(scope): summary`.
 - Coordinar mediante PR relacionados cualquier cambio en la interfaz de datos con el backend.
+- Relacionar el PR de código con el PR documental cuando cambie un dataset, una regla, una métrica o un flujo.
 
 ## Verificación
 
