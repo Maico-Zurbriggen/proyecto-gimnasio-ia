@@ -1,20 +1,24 @@
-# Instrucciones del motor analítico
+# Instrucciones del servicio de IA y analítica
 
 ## Contexto
 
-Este repositorio contiene los procesos batch Python de análisis y machine learning. La API Express y el frontend React viven en repositorios independientes.
+Este repositorio contiene los procesos batch Python de análisis y machine learning. La API Express y el frontend React viven en repositorios independientes. Antes de implementar una tarea, consultar el documento funcional correspondiente en `docs/`.
 
-La documentación canónica vive en `Maico-Zurbriggen/proyecto-gimnasio-documentacion`. Cuando los repositorios están clonados como carpetas hermanas, leer primero `../proyecto-gimnasio-documentacion/AGENTS.md` y usar su `manifest.json` para seleccionar el contexto de la tarea. Si no está disponible localmente, consultar su versión en GitHub; no reconstruir reglas por memoria ni copiar documentación a este repositorio.
+La documentación canónica vive en `Maico-Zurbriggen/proyecto-gimnasio-documentacion`. Con repositorios hermanos, leer primero `../proyecto-gimnasio-documentacion/AGENTS.md` y usar `manifest.json`. Si no está local, consultar GitHub; no copiar documentación aquí.
 
-## Responsabilidad
+## Servicio generativo
 
-- Implementar jobs reproducibles para extracción, features, entrenamiento, evaluación y scoring batch.
-- No exponer una API HTTP ni entrar en el camino de una petición del usuario.
-- Leer vistas o snapshots explícitamente acordados con el backend.
-- Escribir resultados precalculados con versión, fecha y metadatos de evaluación.
-- Mantener separadas extracción, transformación, entrenamiento, evaluación y persistencia.
+- Mantener separados API, autenticación, contratos, orquestación, conector LLM, persistencia y worker.
+- Publicar OpenAPI versionado como fuente de verdad para backend.
+- Aceptar solicitudes idempotentes con `202`; nunca esperar al LLM dentro de la petición.
+- Procesar mediante worker durable capaz de recuperar trabajos tras un reinicio.
+- Llamar al LLM sólo mediante un conector privado y validar su salida estructural.
+- Escribir únicamente estados y resultados en estructuras de integración acordadas.
+- No crear, aprobar, asignar ni activar rutinas; backend conserva reglas y autoridad.
+- Cada intento vence inicialmente a los 120 segundos y admite un único reintento.
+- Tras el segundo fallo registrar indisponibilidad; no generar fallback determinístico.
 
-## Integridad analítica
+## Datos y seguridad
 
 - Construir features point-in-time: ninguna fila puede usar información posterior al instante predicho.
 - Separar train, validation y test por tiempo o usuario; documentar la elección.
@@ -37,10 +41,12 @@ La documentación canónica vive en `Maico-Zurbriggen/proyecto-gimnasio-document
 - Ejecutar `python -m ruff check .`.
 - Ejecutar `python -m mypy src`.
 - Ejecutar `python -m pytest`.
+- Probar idempotencia, reinicio del worker, timeout, reintento, permisos PostgreSQL y aislamiento de ambientes.
 
 ## Code Review Rules
 
-- Bloquear fuga temporal, métricas calculadas sobre el conjunto de entrenamiento o splits no reproducibles.
-- Bloquear scores sin versión del componente y fecha de cálculo.
-- Bloquear inferencia online o acoplamiento directo del frontend con Python.
-- Exigir tests para transformaciones, límites temporales, valores faltantes y persistencia idempotente.
+- Bloquear espera del LLM dentro de la petición HTTP.
+- Bloquear acceso a tablas de dominio o datos identificatorios innecesarios.
+- Bloquear resultados sin modelo, configuración, instante y contexto reproducible.
+- Bloquear cambios de IA sin evaluación y revisión humana requerida.
+- Bloquear fuga temporal o splits no reproducibles en jobs batch.

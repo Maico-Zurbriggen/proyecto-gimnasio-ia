@@ -9,7 +9,6 @@ build/
 *.egg-info/
 .env
 .env.*
-!.env.example
 .idea/
 .vscode/
 .codex-log/
