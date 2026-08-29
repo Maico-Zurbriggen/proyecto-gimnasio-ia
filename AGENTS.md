@@ -2,13 +2,9 @@
 
 ## Contexto
 
-<<<<<<< Updated upstream
 Este repositorio contiene los procesos batch Python de análisis y machine learning. La API Express y el frontend React viven en repositorios independientes. Antes de implementar una tarea, consultar el documento funcional correspondiente en `docs/`.
-=======
-Este repositorio contiene dos límites: servicio generativo online Python y jobs analíticos batch. La API y el worker se despliegan en el Polo, se publican al backend mediante ngrok y orquestan el LLM alojado allí. Frontend nunca consume este repositorio directamente.
 
 La documentación canónica vive en `Maico-Zurbriggen/proyecto-gimnasio-documentacion`. Con repositorios hermanos, leer primero `../proyecto-gimnasio-documentacion/AGENTS.md` y usar `manifest.json`. Si no está local, consultar GitHub; no copiar documentación aquí.
->>>>>>> Stashed changes
 
 ## Servicio generativo
 
@@ -24,7 +20,6 @@ La documentación canónica vive en `Maico-Zurbriggen/proyecto-gimnasio-document
 
 ## Datos y seguridad
 
-<<<<<<< Updated upstream
 - Construir features point-in-time: ninguna fila puede usar información posterior al instante predicho.
 - Separar train, validation y test por tiempo o usuario; documentar la elección.
 - Comparar todo modelo contra un criterio de referencia simple.
@@ -32,44 +27,14 @@ La documentación canónica vive en `Maico-Zurbriggen/proyecto-gimnasio-document
 - Fijar seeds, versiones, parámetros y artefactos necesarios para reproducir resultados.
 - No usar datos personales reales ni subir datasets sensibles, modelos grandes o notebooks con salidas privadas.
 - Los notebooks son exploratorios; la lógica aceptada debe migrar a módulos y tests.
-- Nombrar conceptos con los términos literales de `docs/D2-glosario.md`.
+- Nombrar conceptos con los términos literales de `product/glossary.md` del repositorio documental.
 
 ## Forma de trabajo
 
 - Crear ramas desde `develop`; todo cambio entra por pull request.
 - Usar Conventional Commits en inglés: `type(scope): summary`.
 - Coordinar mediante PR relacionados cualquier cambio en la interfaz de datos con el backend.
-=======
-- Usar identificadores técnicos y sólo contexto necesario.
-- No recibir ni registrar nombre, correo, teléfono, documento, credenciales o prompts completos.
-- Separar authtoken de ngrok, credencial backend–IA y credencial IA–LLM.
-- Credenciales test/producción seleccionan conexiones configuradas internamente; nunca aceptar una URL de base en la petición.
-- El rol PostgreSQL de IA no accede a identidad ni modifica tablas de dominio.
-- Resultados fallidos y solicitudes abandonadas se eliminan a los 30 días.
-
-## Analítica batch
-
-- Mantener separados extracción, features, entrenamiento, evaluación, scoring y persistencia.
-- Construir features point-in-time y splits reproducibles.
-- Comparar modelos contra un criterio simple.
-- Escribir resultados precalculados con versión, fecha y metadatos.
-- No ejecutar jobs batch dentro de una petición online.
-
-## Desarrollo y pruebas
-
-- El desarrollo local usa Neon Test con rol restringido y, cuando sea accesible, la API real del LLM del Polo.
-- No implementar un adaptador fake ejecutable. En tests se permiten dobles del conector LLM y de persistencia.
-- No ejecutar migraciones; backend es dueño del esquema.
-- Versionar modelo, prompt, parámetros y contrato.
-- Todo cambio de modelo, prompt o parámetros requiere dataset de regresión verde y validación de al menos un entrenador antes de `main`.
-
-## Forma de trabajo
-
-- Crear ramas desde `develop`; todo cambio entra por PR.
-- Promover `develop → test → main`; no crear commits exclusivos en `test`.
-- Usar Conventional Commits en inglés.
-- Coordinar PR relacionados con backend y documentación al cambiar OpenAPI, persistencia, métricas o flujos.
->>>>>>> Stashed changes
+- Relacionar el PR de código con el PR documental cuando cambie un dataset, una regla, una métrica o un flujo.
 
 ## Verificación
 

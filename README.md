@@ -49,8 +49,5 @@ python -m mypy src
 python -m pytest
 ```
 
-<<<<<<< Updated upstream
 La interfaz de datos con el backend está descrita en [docs/data-interface.md](docs/data-interface.md). El corpus funcional compartido está indexado en [docs/README.md](docs/README.md).
-=======
-La arquitectura y contratos de persistencia están en [proyecto-gimnasio-documentacion](https://github.com/Maico-Zurbriggen/proyecto-gimnasio-documentacion). Para trabajo asistido por IA, comenzar por su `AGENTS.md` y `manifest.json`.
->>>>>>> Stashed changes
+La interfaz con el backend está descrita en `architecture/data-interface.md` del [repositorio documental](https://github.com/Maico-Zurbriggen/proyecto-gimnasio-documentacion). Allí también viven el corpus funcional, la arquitectura y las reglas de dominio. Para trabajo asistido por IA, comenzar por su `AGENTS.md` y `manifest.json`.
