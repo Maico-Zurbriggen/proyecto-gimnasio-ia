@@ -37,9 +37,15 @@ python -m venv .venv
 # Activar el entorno virtual
 python -m pip install -e ".[dev]"
 cp .env.example .env
+
+# API (recibe la solicitud, 202 inmediato)
+python -m uvicorn gym_engine.api.app:app --reload
+
+# Worker (procesa fuera de la petición HTTP, proceso separado)
+python -m gym_engine.worker.poller
 ```
 
-Las dependencias HTTP y los comandos de API/worker se incorporarán con el esqueleto de integración. Backend es dueño de las migraciones; este repositorio no ejecuta cambios de esquema.
+Backend es dueño de las migraciones; este repositorio no ejecuta cambios de esquema — las tablas `ai_generation_*` deben existir de antemano en `DATABASE_URL`.
 
 ## Verificación
 
