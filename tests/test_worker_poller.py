@@ -49,7 +49,7 @@ class FakeOllamaClient:
 
 
 def _settings() -> Settings:
-    return Settings(database_url="sqlite://", ollama_model="test-model")
+    return Settings(_env_file=None, database_url="sqlite://", ollama_model="test-model")
 
 
 def test_process_one_generates_and_persists_result(session: Session) -> None:

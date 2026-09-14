@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -62,7 +62,7 @@ class OllamaClient:
 
 
 class OpenAiClient:
-    """Conector privado hacia la API de OpenAI (Chat Completions + structured outputs)."""
+    """Conector privado hacia la Responses API de OpenAI (structured outputs)."""
 
     def __init__(self, settings: Settings) -> None:
         if not settings.openai_api_key:
@@ -78,19 +78,19 @@ class OpenAiClient:
     def generate_structured(self, prompt: str, schema: type[ModelT]) -> ModelT:
         payload = {
             "model": self._model,
-            "messages": [{"role": "user", "content": prompt}],
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
+            "input": prompt,
+            "text": {
+                "format": {
+                    "type": "json_schema",
                     "name": schema.__name__,
                     "schema": schema.model_json_schema(),
                     "strict": True,
-                },
+                }
             },
         }
         try:
             response = httpx.post(
-                f"{self._base_url}/chat/completions",
+                f"{self._base_url}/responses",
                 json=payload,
                 headers=self._headers(),
                 timeout=self._timeout,
@@ -99,15 +99,28 @@ class OpenAiClient:
         except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError) as exc:
             raise LlmUnavailable(str(exc)) from exc
 
-        try:
-            raw = response.json()["choices"][0]["message"]["content"]
-        except (KeyError, IndexError) as exc:
-            raise LlmInvalidOutput(f"respuesta de OpenAI sin contenido: {exc}") from exc
-
+        raw = self._extract_output_text(response.json())
         try:
             return schema.model_validate_json(raw)
         except ValidationError as exc:
             raise LlmInvalidOutput(str(exc)) from exc
+
+    @staticmethod
+    def _extract_output_text(body: dict[str, Any]) -> str:
+        output = body.get("output", [])
+        if isinstance(output, list):
+            for item in output:
+                if not isinstance(item, dict) or item.get("type") != "message":
+                    continue
+                content = item.get("content", [])
+                if not isinstance(content, list):
+                    continue
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "output_text":
+                        text = part.get("text")
+                        if isinstance(text, str):
+                            return text
+        raise LlmInvalidOutput(f"respuesta de OpenAI sin output_text: {body}")
 
 
 def build_llm_client(settings: Settings) -> LlmClient:
