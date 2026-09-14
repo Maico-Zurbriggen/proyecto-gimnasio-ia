@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from gym_engine.config import Settings
-from gym_engine.llm.client import LlmInvalidOutput, LlmUnavailable, OllamaClient
+from gym_engine.llm.client import LlmClient, LlmInvalidOutput, LlmUnavailable
 from gym_engine.llm.schemas import ParametrosRutina, RutinaEstructurada
 from gym_engine.orchestration.state import GraphState
 from gym_engine.persistence import repository
@@ -26,7 +26,7 @@ RouterFn = Callable[[GraphState], str]
 
 @dataclass
 class NodeDeps:
-    client: OllamaClient
+    client: LlmClient
     session: Session
     settings: Settings
 

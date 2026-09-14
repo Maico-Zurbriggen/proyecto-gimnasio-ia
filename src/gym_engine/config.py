@@ -12,10 +12,16 @@ class Settings(BaseSettings):
 
     database_url: str
 
+    llm_provider: str = "ollama"  # "ollama" | "openai"
+
     llm_api_url: str = "http://127.0.0.1:11434"
     llm_auth_mode: str = "none"
     llm_api_key: str | None = None
     ollama_model: str = "llama3.1"
+
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-4o-mini"
+    openai_base_url: str = "https://api.openai.com/v1"
 
     generation_timeout_seconds: int = 120
     generation_max_retries: int = 1

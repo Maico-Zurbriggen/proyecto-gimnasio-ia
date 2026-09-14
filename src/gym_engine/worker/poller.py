@@ -15,7 +15,7 @@ import time
 from sqlalchemy.orm import Session, sessionmaker
 
 from gym_engine.config import Settings, get_settings
-from gym_engine.llm.client import OllamaClient
+from gym_engine.llm.client import build_llm_client
 from gym_engine.llm.schemas import EjercicioRef, MinimizedContext, ParametrosRutina
 from gym_engine.orchestration.graph import build_graph
 from gym_engine.orchestration.nodes import NodeDeps
@@ -48,7 +48,7 @@ def process_one(session: Session, settings: Settings) -> bool:
     if request is None:
         return False
 
-    deps = NodeDeps(client=OllamaClient(settings), session=session, settings=settings)
+    deps = NodeDeps(client=build_llm_client(settings), session=session, settings=settings)
     graph = build_graph(deps)
     try:
         graph.invoke(_initial_state(request))
