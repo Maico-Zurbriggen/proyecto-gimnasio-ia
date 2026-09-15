@@ -58,8 +58,7 @@ def create_app() -> FastAPI:
             await OllamaClient(
                 settings.llm_api_url,
                 settings.llm_model,
-                settings.llm_username,
-                settings.llm_password,
+                settings.llm_api_token,
                 settings.timeout_seconds,
             ).ping()
         except Exception as error:

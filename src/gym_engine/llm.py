@@ -22,18 +22,17 @@ class OllamaClient:
         self,
         base_url: str,
         model: str,
-        username: str,
-        password: str,
+        api_token: str,
         timeout_seconds: int,
     ) -> None:
         self._base_url = base_url
         self._model = model
-        self._auth = httpx.BasicAuth(username, password)
+        self._headers = {"Authorization": f"Bearer {api_token}"}
         self._timeout = timeout_seconds
 
     async def ping(self) -> None:
         async with httpx.AsyncClient(
-            auth=self._auth, timeout=10, follow_redirects=False
+            headers=self._headers, timeout=10, follow_redirects=False
         ) as client:
             response = await client.get(f"{self._base_url}/api/tags")
             response.raise_for_status()
@@ -73,7 +72,7 @@ class OllamaClient:
             "options": {"temperature": 0.2},
         }
         async with httpx.AsyncClient(
-            auth=self._auth,
+            headers=self._headers,
             timeout=httpx.Timeout(self._timeout),
             follow_redirects=False,
         ) as client:

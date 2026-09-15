@@ -27,8 +27,7 @@ class Settings:
     queue_region: str
     llm_api_url: str
     llm_model: str
-    llm_username: str
-    llm_password: str
+    llm_api_token: str
     configuration_version: str
     timeout_seconds: int
     max_attempts: int
@@ -45,8 +44,7 @@ class Settings:
             queue_region=os.getenv("QUEUE_REGION", "gru1").strip(),
             llm_api_url=_required("LLM_API_URL").rstrip("/"),
             llm_model=_required("LLM_MODEL"),
-            llm_username=_required("LLM_BASIC_AUTH_USERNAME"),
-            llm_password=_required("LLM_BASIC_AUTH_PASSWORD"),
+            llm_api_token=_required("LLM_API_TOKEN"),
             configuration_version=os.getenv(
                 "LLM_CONFIGURATION_VERSION", "generative/generar-rutina@1"
             ).strip(),

@@ -22,7 +22,7 @@ Servicio Python de generación online y procesos batch de análisis y machine le
 
 ## Despliegue objetivo
 
-API FastAPI y consumidor durable se despliegan en Vercel. Vercel Queues desacopla la aceptación `202` del trabajo de generación. El LLM permanece en el Polo detrás de un dominio HTTPS estable de ngrok protegido con Basic Auth; Ollama no se expone sin autenticación.
+API FastAPI y consumidor durable se despliegan en Vercel. Vercel Queues desacopla la aceptación `202` del trabajo de generación. El LLM permanece en el Polo detrás de un dominio HTTPS estable de Cloudflare Tunnel protegido con un token Bearer; Ollama no se expone sin autenticación.
 
 ## Requisitos actuales
 
@@ -53,7 +53,7 @@ Endpoints:
 
 Importar este repositorio como un proyecto FastAPI sin Build Command ni Output Directory. Usar `test` como Preview estable y `main` como Production. Configurar las mismas variables de `.env.example`, con valores y credenciales diferentes por ambiente. `DATABASE_URL` usa el rol runtime restringido de IA, nunca el rol migrador.
 
-La cola y el consumidor se generan desde `vercel-queue`; la región queda en `gru1` y la concurrencia se limita a uno para no saturar Ollama. El endpoint ngrok debe apuntar a Ollama y aplicar Basic Auth en el borde.
+La cola y el consumidor se generan desde `vercel-queue`; la región queda en `gru1` y la concurrencia se limita a uno para no saturar Ollama. `LLM_API_URL` apunta al endpoint publicado mediante Cloudflare Tunnel y `LLM_API_TOKEN` autentica cada llamada como Bearer.
 
 ## Verificación
 

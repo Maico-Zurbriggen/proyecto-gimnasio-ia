@@ -19,7 +19,7 @@ La documentación canónica vive en `Maico-Zurbriggen/proyecto-gimnasio-document
 - Cada intento vence inicialmente a los 120 segundos y admite un único reintento.
 - Tras el segundo fallo registrar indisponibilidad; no generar fallback determinístico.
 - Limitar inicialmente la concurrencia del consumidor a uno para proteger Ollama.
-- El conector a Ollama usa exclusivamente el dominio HTTPS estable de ngrok con autenticación de servicio; nunca exponer Ollama sin protección.
+- El conector a Ollama usa exclusivamente el dominio HTTPS estable de Cloudflare Tunnel y envía `LLM_API_TOKEN` como Bearer; nunca exponer Ollama sin protección.
 
 ## Datos y seguridad
 
