@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from gym_engine.api.auth import RequireApiKey
 from gym_engine.api.schemas import (
     RoutineGenerationAccepted,
     RoutineGenerationCreate,
@@ -15,7 +16,11 @@ from gym_engine.persistence import repository
 from gym_engine.persistence.db import get_session_factory
 from gym_engine.persistence.models import AiGenerationResult, AiResultValidation
 
-router = APIRouter(prefix="/v1/routine-generations", tags=["routine-generations"])
+router = APIRouter(
+    prefix="/v1/routine-generations",
+    tags=["routine-generations"],
+    dependencies=[RequireApiKey],
+)
 
 
 def get_session() -> Iterator[Session]:

@@ -12,6 +12,9 @@ class Settings(BaseSettings):
 
     database_url: str
 
+    ai_service_api_key_test: str | None = None
+    ai_service_api_key_production: str | None = None
+
     llm_provider: str = "ollama"  # "ollama" | "openai"
 
     llm_api_url: str = "http://127.0.0.1:11434"
@@ -28,6 +31,13 @@ class Settings(BaseSettings):
     failed_result_retention_days: int = 30
 
     poller_interval_seconds: float = 2.0
+
+    @property
+    def expected_api_key(self) -> str | None:
+        """Clave que debe traer el header X-API-Key, según el ambiente."""
+        if self.app_env == "production":
+            return self.ai_service_api_key_production
+        return self.ai_service_api_key_test
 
 
 @lru_cache

@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
 from gym_engine.api.app import create_app
+from gym_engine.api.auth import verify_api_key
 from gym_engine.api.routes import get_session
 
 
@@ -22,6 +23,7 @@ def client(sqlite_session_factory: sessionmaker[Session]) -> Iterator[TestClient
             db_session.close()
 
     app.dependency_overrides[get_session] = override_get_session
+    app.dependency_overrides[verify_api_key] = lambda: None
     with TestClient(app) as test_client:
         yield test_client
 
