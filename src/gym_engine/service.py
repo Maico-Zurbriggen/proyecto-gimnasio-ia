@@ -31,8 +31,7 @@ async def process_generation(request_id: UUID, settings: Settings) -> None:
     client = OllamaClient(
         base_url=settings.llm_api_url,
         model=settings.llm_model,
-        username=settings.llm_username,
-        password=settings.llm_password,
+        api_token=settings.llm_api_token,
         timeout_seconds=settings.timeout_seconds,
     )
     try:
