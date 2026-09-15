@@ -2,7 +2,7 @@
 
 ## Contexto
 
-Este repositorio contiene los procesos batch Python de análisis y machine learning. La API Express y el frontend React viven en repositorios independientes. Antes de implementar una tarea, consultar el documento funcional correspondiente en `docs/`.
+Este repositorio contiene la API FastAPI, el consumidor durable de generación y los procesos batch Python futuros. La API Express y el frontend React viven en repositorios independientes.
 
 La documentación canónica vive en `Maico-Zurbriggen/proyecto-gimnasio-documentacion`. Con repositorios hermanos, leer primero `../proyecto-gimnasio-documentacion/AGENTS.md` y usar `manifest.json`. Si no está local, consultar GitHub; no copiar documentación aquí.
 
@@ -11,12 +11,15 @@ La documentación canónica vive en `Maico-Zurbriggen/proyecto-gimnasio-document
 - Mantener separados API, autenticación, contratos, orquestación, conector LLM, persistencia y worker.
 - Publicar OpenAPI versionado como fuente de verdad para backend.
 - Aceptar solicitudes idempotentes con `202`; nunca esperar al LLM dentro de la petición.
-- Procesar mediante worker durable capaz de recuperar trabajos tras un reinicio.
+- Desplegar API y consumidor en Vercel; procesar mediante Vercel Queues y conservar lease e idempotencia en PostgreSQL.
+- Recibir del backend sólo el UUID de una solicitud que ya existe en `ai_integration`.
 - Llamar al LLM sólo mediante un conector privado y validar su salida estructural.
 - Escribir únicamente estados y resultados en estructuras de integración acordadas.
 - No crear, aprobar, asignar ni activar rutinas; backend conserva reglas y autoridad.
 - Cada intento vence inicialmente a los 120 segundos y admite un único reintento.
 - Tras el segundo fallo registrar indisponibilidad; no generar fallback determinístico.
+- Limitar inicialmente la concurrencia del consumidor a uno para proteger Ollama.
+- El conector a Ollama usa exclusivamente el dominio HTTPS estable de ngrok con autenticación de servicio; nunca exponer Ollama sin protección.
 
 ## Datos y seguridad
 
@@ -46,6 +49,7 @@ La documentación canónica vive en `Maico-Zurbriggen/proyecto-gimnasio-document
 ## Code Review Rules
 
 - Bloquear espera del LLM dentro de la petición HTTP.
+- Bloquear tareas críticas con `fire-and-forget`, cron o memoria local en lugar de la cola durable.
 - Bloquear acceso a tablas de dominio o datos identificatorios innecesarios.
 - Bloquear resultados sin modelo, configuración, instante y contexto reproducible.
 - Bloquear cambios de IA sin evaluación y revisión humana requerida.
