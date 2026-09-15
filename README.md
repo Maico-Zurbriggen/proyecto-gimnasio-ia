@@ -22,24 +22,38 @@ Servicio Python de generación online y procesos batch de análisis y machine le
 
 ## Despliegue objetivo
 
-API y worker se ejecutan en el Polo. Ngrok expone únicamente la API Python mediante un dominio estable. El LLM permanece local o privado y no accede a PostgreSQL.
+API FastAPI y consumidor durable se despliegan en Vercel. Vercel Queues desacopla la aceptación `202` del trabajo de generación. El LLM permanece en el Polo detrás de un dominio HTTPS estable de ngrok protegido con Basic Auth; Ollama no se expone sin autenticación.
 
 ## Requisitos actuales
 
 - Python 3.13;
 - acceso autorizado a Neon Test;
-- acceso a la API del LLM del Polo para integración real.
+- acceso a Neon con el rol restringido de IA;
+- acceso al endpoint autenticado del LLM del Polo para integración real.
 
 ## Inicio local
 
 ```bash
 python -m venv .venv
 # Activar el entorno virtual
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[analytics,dev]"
 cp .env.example .env
+python -m uvicorn app:app --reload --port 8000
 ```
 
-Las dependencias HTTP y los comandos de API/worker se incorporarán con el esqueleto de integración. Backend es dueño de las migraciones; este repositorio no ejecuta cambios de esquema.
+En PowerShell, usar `Copy-Item .env.example .env`. Backend es dueño de las migraciones; este repositorio no ejecuta cambios de esquema.
+
+Endpoints:
+
+- `GET /health`: salud del proceso, público y sin consultar dependencias;
+- `GET /ready`: verifica Neon y el LLM; requiere `Authorization: Bearer <AI_SERVICE_API_KEY>`;
+- `POST /v1/generation-requests/{requestId}/dispatch`: verifica una solicitud creada por backend, la publica en Vercel Queues y responde `202`.
+
+## Vercel
+
+Importar este repositorio como un proyecto FastAPI sin Build Command ni Output Directory. Usar `test` como Preview estable y `main` como Production. Configurar las mismas variables de `.env.example`, con valores y credenciales diferentes por ambiente. `DATABASE_URL` usa el rol runtime restringido de IA, nunca el rol migrador.
+
+La cola y el consumidor se generan desde `vercel-queue`; la región queda en `gru1` y la concurrencia se limita a uno para no saturar Ollama. El endpoint ngrok debe apuntar a Ollama y aplicar Basic Auth en el borde.
 
 ## Verificación
 
@@ -49,5 +63,4 @@ python -m mypy src
 python -m pytest
 ```
 
-La interfaz de datos con el backend está descrita en [docs/data-interface.md](docs/data-interface.md). El corpus funcional compartido está indexado en [docs/README.md](docs/README.md).
 La interfaz con el backend está descrita en `architecture/data-interface.md` del [repositorio documental](https://github.com/Maico-Zurbriggen/proyecto-gimnasio-documentacion). Allí también viven el corpus funcional, la arquitectura y las reglas de dominio. Para trabajo asistido por IA, comenzar por su `AGENTS.md` y `manifest.json`.
