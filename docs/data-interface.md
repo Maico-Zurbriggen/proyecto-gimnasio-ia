@@ -20,7 +20,7 @@ Todos los endpoints bajo `/v1/routine-generations` exigen el header:
 X-API-Key: <clave>
 ```
 
-La clave esperada la define el servicio de IA por variable de entorno (`AI_SERVICE_API_KEY_TEST` o `AI_SERVICE_API_KEY_PRODUCTION` según `APP_ENV`) — el backend la manda tal cual, no hay negociación ni token con expiración.
+La clave esperada la define el servicio de IA por variable de entorno (`AI_SERVICE_API_KEY`, una sola por deployment) — el backend la manda tal cual, no hay negociación ni token con expiración.
 
 | Situación | Código |
 |---|---|

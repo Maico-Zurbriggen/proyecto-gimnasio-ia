@@ -15,8 +15,7 @@ def _settings(**overrides: object) -> Settings:
     base: dict[str, object] = {
         "_env_file": None,
         "database_url": "postgresql://example.invalid/gym-test",
-        "app_env": "test",
-        "ai_service_api_key_test": "the-real-key",
+        "ai_service_api_key": "the-real-key",
     }
     base.update(overrides)
     return Settings(**base)  # type: ignore[arg-type]
@@ -75,22 +74,8 @@ def test_correct_api_key_is_accepted(make_client: Callable[[Settings], TestClien
     assert response.status_code == 202
 
 
-def test_production_uses_production_key(make_client: Callable[[Settings], TestClient]) -> None:
-    client = make_client(_settings(app_env="production", ai_service_api_key_production="prod-key"))
-    # la clave de test ya no vale en produccion
-    rejected = client.post(
-        "/v1/routine-generations", json=_payload(), headers={"X-API-Key": "the-real-key"}
-    )
-    assert rejected.status_code == 401
-
-    accepted = client.post(
-        "/v1/routine-generations", json=_payload(), headers={"X-API-Key": "prod-key"}
-    )
-    assert accepted.status_code == 202
-
-
 def test_unconfigured_key_fails_closed(make_client: Callable[[Settings], TestClient]) -> None:
-    client = make_client(_settings(ai_service_api_key_test=None))
+    client = make_client(_settings(ai_service_api_key=None))
     response = client.post(
         "/v1/routine-generations", json=_payload(), headers={"X-API-Key": "anything"}
     )

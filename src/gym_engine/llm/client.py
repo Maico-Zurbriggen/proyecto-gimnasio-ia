@@ -29,7 +29,7 @@ class OllamaClient:
         self._base_url = settings.llm_api_url.rstrip("/")
         self._model = settings.ollama_model
         self._timeout = settings.generation_timeout_seconds
-        self._api_key = settings.llm_api_key
+        self._api_key = settings.llm_api_token
 
     def _headers(self) -> dict[str, str]:
         if self._api_key:

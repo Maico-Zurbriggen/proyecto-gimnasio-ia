@@ -18,7 +18,7 @@ import time
 import psycopg
 from psycopg.rows import DictRow
 
-from gym_engine.config import Settings, get_settings
+from gym_engine.config import CONTRACT_VERSION, Settings, get_settings
 from gym_engine.llm.client import build_llm_client
 from gym_engine.llm.schemas import EjercicioRef, MinimizedContext, ParametrosRutina
 from gym_engine.orchestration.graph import build_graph
@@ -55,7 +55,7 @@ def process_one(conn: psycopg.Connection[DictRow], settings: Settings) -> bool:
         conn,
         worker_id=_WORKER_ID,
         lease_seconds=settings.generation_timeout_seconds + 30,
-        contract_version=settings.contract_version,
+        contract_version=CONTRACT_VERSION,
         model_version=settings.model_version,
         configuration_version=settings.configuration_version,
     )
