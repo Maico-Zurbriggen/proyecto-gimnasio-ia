@@ -1,18 +1,22 @@
 """Worker durable (AGENTS.md): procesa solicitudes fuera de la peticion HTTP.
 
-Sin cola dedicada en esta corrida: reclama filas 'pending' de ai_generation_requests
-(claim atomico en repository.claim_next_pending) y corre el grafo reducido. Si el proceso
-se reinicia, las filas 'pending' siguen ahi y se retoman; una fila que quedo 'processing'
-por un crash a mitad de camino NO se reintenta automaticamente en esta version (limitacion
-conocida, documentada en la spec, pendiente de lease/heartbeat en una proxima corrida).
+Reclama filas 'PENDIENTE' (o 'PROCESANDO' con lease vencida) de
+ai_integration.ai_generation_requests via repository.claim_next_pending -- FOR UPDATE SKIP
+LOCKED + lease, atomico -- y corre el grafo
+reducido. Si el proceso se reinicia a mitad de un intento, la lease vence sola y otro tick la
+retoma; no hace falta heartbeat porque el claim ya lo resuelve (a diferencia de la version anterior
+de este poller, que pollaba una tabla que no correspondia al esquema real).
 """
 
 from __future__ import annotations
 
 import logging
+import os
+import socket
 import time
 
-from sqlalchemy.orm import Session, sessionmaker
+import psycopg
+from psycopg.rows import DictRow
 
 from gym_engine.config import Settings, get_settings
 from gym_engine.llm.client import build_llm_client
@@ -21,60 +25,73 @@ from gym_engine.orchestration.graph import build_graph
 from gym_engine.orchestration.nodes import NodeDeps
 from gym_engine.orchestration.state import GraphState
 from gym_engine.persistence import repository
-from gym_engine.persistence.db import get_engine, get_session_factory
-from gym_engine.persistence.models import AiGenerationRequest
+from gym_engine.persistence.db import get_connection
+from gym_engine.persistence.models import ClaimedGeneration
 
 logger = logging.getLogger(__name__)
 
+_WORKER_ID = f"poller:{socket.gethostname()}:{os.getpid()}"
 
-def _initial_state(request: AiGenerationRequest) -> GraphState:
+
+def _initial_state(claimed: ClaimedGeneration) -> GraphState:
+    context = claimed.minimized_context
     return {
-        "request_id": request.id,
-        "texto_libre": request.texto_libre,
+        "texto_libre": context.get("texto_libre"),
         "parametros": (
-            ParametrosRutina.model_validate(request.parametros) if request.parametros else None
+            ParametrosRutina.model_validate(context["parametros"])
+            if context.get("parametros")
+            else None
         ),
         "catalogo_prefiltrado": [
-            EjercicioRef.model_validate(e) for e in request.catalogo_prefiltrado
+            EjercicioRef.model_validate(e) for e in context.get("catalogo_prefiltrado", [])
         ],
-        "contexto_minimizado": MinimizedContext.model_validate(request.contexto_minimizado),
+        "contexto_minimizado": MinimizedContext.model_validate(context["contexto_minimizado"]),
         "violaciones": [],
-        "intentos_generacion": 0,
     }
 
 
-def process_one(session: Session, settings: Settings) -> bool:
-    request = repository.claim_next_pending(session)
-    if request is None:
+def process_one(conn: psycopg.Connection[DictRow], settings: Settings) -> bool:
+    claimed = repository.claim_next_pending(
+        conn,
+        worker_id=_WORKER_ID,
+        lease_seconds=settings.generation_timeout_seconds + 30,
+        contract_version=settings.contract_version,
+        model_version=settings.model_version,
+        configuration_version=settings.configuration_version,
+    )
+    if claimed is None:
         return False
 
-    deps = NodeDeps(client=build_llm_client(settings), session=session, settings=settings)
+    deps = NodeDeps(
+        client=build_llm_client(settings), conn=conn, settings=settings, claimed=claimed
+    )
     graph = build_graph(deps)
     try:
-        graph.invoke(_initial_state(request))
-        session.commit()
+        graph.invoke(_initial_state(claimed))
+        conn.commit()
     except Exception:
-        session.rollback()
-        repository.mark_failed(
-            session, request_id=request.id, error="fallo no controlado en el grafo"
+        conn.rollback()
+        repository.fail(
+            conn,
+            claimed,
+            attempt_state="FALLIDO",
+            error_code="unexpected_error",
+            max_attempts=deps.max_attempts,
         )
-        session.commit()
-        logger.exception("Fallo procesando request_id=%s", request.id)
+        conn.commit()
+        logger.exception("Fallo procesando request_id=%s", claimed.request_id)
     return True
 
 
-def run_forever(
-    session_factory: sessionmaker[Session] | None = None, settings: Settings | None = None
-) -> None:
+def run_forever(settings: Settings | None = None) -> None:
     settings = settings or get_settings()
-    factory = session_factory or get_session_factory(get_engine(settings))
     logger.info("Poller iniciado, intervalo=%ss", settings.poller_interval_seconds)
     while True:
-        session = factory()
+        conn = get_connection(settings)
         try:
-            processed = process_one(session, settings)
+            processed = process_one(conn, settings)
         finally:
-            session.close()
+            conn.close()
         if not processed:
             time.sleep(settings.poller_interval_seconds)
 

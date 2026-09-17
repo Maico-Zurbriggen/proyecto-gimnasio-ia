@@ -1,19 +1,20 @@
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session, sessionmaker
 
+import gym_engine.api.routes as routes_module
 from gym_engine.api.app import create_app
-from gym_engine.api.routes import get_session
+from gym_engine.api.routes import get_connection_dep
 from gym_engine.config import Settings, get_settings
+from tests.conftest import FakeConnection, FakeRepository
 
 
 def _settings(**overrides: object) -> Settings:
-    base = {
+    base: dict[str, object] = {
         "_env_file": None,
-        "database_url": "sqlite://",
+        "database_url": "postgresql://example.invalid/gym-test",
         "app_env": "test",
         "ai_service_api_key_test": "the-real-key",
     }
@@ -22,19 +23,16 @@ def _settings(**overrides: object) -> Settings:
 
 
 @pytest.fixture
-def make_client(sqlite_session_factory: sessionmaker[Session]):
+def make_client(
+    fake_repository: FakeRepository,
+    fake_connection: FakeConnection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[[Settings], TestClient]:
+    monkeypatch.setattr(routes_module, "repository", fake_repository)
+
     def _make(settings: Settings) -> TestClient:
         app = create_app()
-
-        def override_get_session() -> Iterator[Session]:
-            db_session = sqlite_session_factory()
-            try:
-                yield db_session
-                db_session.commit()
-            finally:
-                db_session.close()
-
-        app.dependency_overrides[get_session] = override_get_session
+        app.dependency_overrides[get_connection_dep] = lambda: fake_connection
         app.dependency_overrides[get_settings] = lambda: settings
         return TestClient(app)
 
@@ -55,13 +53,13 @@ def _payload() -> dict:
     }
 
 
-def test_missing_api_key_is_rejected(make_client) -> None:  # type: ignore[no-untyped-def]
+def test_missing_api_key_is_rejected(make_client: Callable[[Settings], TestClient]) -> None:
     client = make_client(_settings())
     response = client.post("/v1/routine-generations", json=_payload())
     assert response.status_code == 401
 
 
-def test_wrong_api_key_is_rejected(make_client) -> None:  # type: ignore[no-untyped-def]
+def test_wrong_api_key_is_rejected(make_client: Callable[[Settings], TestClient]) -> None:
     client = make_client(_settings())
     response = client.post(
         "/v1/routine-generations", json=_payload(), headers={"X-API-Key": "nope"}
@@ -69,7 +67,7 @@ def test_wrong_api_key_is_rejected(make_client) -> None:  # type: ignore[no-unty
     assert response.status_code == 401
 
 
-def test_correct_api_key_is_accepted(make_client) -> None:  # type: ignore[no-untyped-def]
+def test_correct_api_key_is_accepted(make_client: Callable[[Settings], TestClient]) -> None:
     client = make_client(_settings())
     response = client.post(
         "/v1/routine-generations", json=_payload(), headers={"X-API-Key": "the-real-key"}
@@ -77,10 +75,8 @@ def test_correct_api_key_is_accepted(make_client) -> None:  # type: ignore[no-un
     assert response.status_code == 202
 
 
-def test_production_uses_production_key(make_client) -> None:  # type: ignore[no-untyped-def]
-    client = make_client(
-        _settings(app_env="production", ai_service_api_key_production="prod-key")
-    )
+def test_production_uses_production_key(make_client: Callable[[Settings], TestClient]) -> None:
+    client = make_client(_settings(app_env="production", ai_service_api_key_production="prod-key"))
     # la clave de test ya no vale en produccion
     rejected = client.post(
         "/v1/routine-generations", json=_payload(), headers={"X-API-Key": "the-real-key"}
@@ -93,7 +89,7 @@ def test_production_uses_production_key(make_client) -> None:  # type: ignore[no
     assert accepted.status_code == 202
 
 
-def test_unconfigured_key_fails_closed(make_client) -> None:  # type: ignore[no-untyped-def]
+def test_unconfigured_key_fails_closed(make_client: Callable[[Settings], TestClient]) -> None:
     client = make_client(_settings(ai_service_api_key_test=None))
     response = client.post(
         "/v1/routine-generations", json=_payload(), headers={"X-API-Key": "anything"}
@@ -101,7 +97,7 @@ def test_unconfigured_key_fails_closed(make_client) -> None:  # type: ignore[no-
     assert response.status_code == 500
 
 
-def test_get_endpoint_also_requires_api_key(make_client) -> None:  # type: ignore[no-untyped-def]
+def test_get_endpoint_also_requires_api_key(make_client: Callable[[Settings], TestClient]) -> None:
     client = make_client(_settings())
     response = client.get(f"/v1/routine-generations/{uuid.uuid4()}")
     assert response.status_code == 401

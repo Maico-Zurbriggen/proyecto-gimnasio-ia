@@ -1,7 +1,14 @@
+"""Testea el grafo cableado end-to-end (nodos + persistencia) mockeando la capa de
+persistencia -- no hay Postgres real disponible en este entorno para probar
+claim_next_pending/complete/fail contra las tablas reales de ai_integration."""
+
 import uuid
+from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy.orm import Session
+import pytest
 
+import gym_engine.orchestration.nodes as nodes_module
 from gym_engine.config import Settings
 from gym_engine.llm.schemas import (
     DiaRutinaCandidato,
@@ -12,12 +19,11 @@ from gym_engine.llm.schemas import (
 )
 from gym_engine.orchestration.graph import build_graph
 from gym_engine.orchestration.nodes import NodeDeps
-from gym_engine.persistence import repository
-from gym_engine.persistence.models import AiGenerationResult
+from gym_engine.persistence.models import ClaimedGeneration
 from gym_engine.worker.poller import _initial_state
 
 
-class FakeOllamaClient:
+class FakeGenerationClient:
     def __init__(self, ejercicio_id: uuid.UUID) -> None:
         self._ejercicio_id = ejercicio_id
 
@@ -48,48 +54,94 @@ class FakeOllamaClient:
         raise AssertionError(f"schema inesperado: {schema}")
 
 
-def _settings() -> Settings:
-    return Settings(_env_file=None, database_url="sqlite://", ollama_model="test-model")
+class FakeRepositoryCalls:
+    def __init__(self) -> None:
+        self.completed: list[dict[str, Any]] = []
+        self.failed: list[dict[str, Any]] = []
+
+    def complete(self, conn: object, claimed: ClaimedGeneration, **kwargs: object) -> None:
+        self.completed.append({"claimed": claimed, **kwargs})
+
+    def fail(self, conn: object, claimed: ClaimedGeneration, **kwargs: object) -> bool:
+        self.failed.append({"claimed": claimed, **kwargs})
+        return kwargs.get("max_attempts") == 1
 
 
-def test_process_one_generates_and_persists_result(session: Session) -> None:
-    ejercicio_id = uuid.uuid4()
-    request = repository.create_request(
-        session,
-        idempotency_key="worker-key",
-        gym_id=uuid.uuid4(),
-        student_id=uuid.uuid4(),
-        requested_by_user_id=uuid.uuid4(),
-        catalogo_prefiltrado=[
-            {"id": str(ejercicio_id), "nombre": "Sentadilla", "patron_movimiento": "squat"}
-        ],
-        contexto_minimizado={
-            "nivel_experiencia": "intermedio",
-            "dias_semanales_disponibles": 3,
+def _settings(**overrides: object) -> Settings:
+    base: dict[str, object] = {
+        "_env_file": None,
+        "database_url": "postgresql://example.invalid/gym-test",
+        "ollama_model": "test-model",
+    }
+    base.update(overrides)
+    return Settings(**base)  # type: ignore[arg-type]
+
+
+def _claimed(ejercicio_id: uuid.UUID) -> ClaimedGeneration:
+    return ClaimedGeneration(
+        request_id=uuid.uuid4(),
+        attempt_id=uuid.uuid4(),
+        attempt_number=1,
+        minimized_context={
+            "texto_libre": None,
+            "parametros": ParametrosRutina(
+                objetivo="fuerza", frecuencia_semanal=3, duracion_minutos=50
+            ).model_dump(mode="json"),
+            "catalogo_prefiltrado": [
+                {"id": str(ejercicio_id), "nombre": "Sentadilla", "patron_movimiento": "squat"}
+            ],
+            "contexto_minimizado": {
+                "nivel_experiencia": "intermedio",
+                "dias_semanales_disponibles": 3,
+            },
         },
-        parametros=ParametrosRutina(
-            objetivo="fuerza", frecuencia_semanal=3, duracion_minutos=50
-        ).model_dump(mode="json"),
+        preferences={},
+        retention_until=datetime.now(UTC),
     )
-    session.commit()
 
-    claimed = repository.claim_next_pending(session)
-    assert claimed is not None
+
+def test_process_completes_and_calls_repository_complete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ejercicio_id = uuid.uuid4()
+    claimed = _claimed(ejercicio_id)
+    calls = FakeRepositoryCalls()
+    monkeypatch.setattr(nodes_module, "repository", calls)  # type: ignore[attr-defined]
 
     deps = NodeDeps(
-        client=FakeOllamaClient(ejercicio_id),  # type: ignore[arg-type]
-        session=session,
+        client=FakeGenerationClient(ejercicio_id),  # type: ignore[arg-type]
+        conn=None,  # type: ignore[arg-type]
         settings=_settings(),
+        claimed=claimed,
     )
     graph = build_graph(deps)
-
     graph.invoke(_initial_state(claimed))
-    session.commit()
 
-    refreshed = repository.get_request(session, request.id)
-    assert refreshed is not None
-    assert refreshed.status == "completed"
+    assert len(calls.completed) == 1
+    assert calls.failed == []
+    output = calls.completed[0]["output"]
+    assert output["dias"][0]["ejercicios"][0]["ejercicio_id"] == str(ejercicio_id)
 
-    result = session.query(AiGenerationResult).filter_by(request_id=request.id).one()
-    dia = result.estructura_candidata["dias"][0]
-    assert dia["ejercicios"][0]["ejercicio_id"] == str(ejercicio_id)
+
+def test_process_fails_when_llm_returns_exercise_outside_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalogo_id = uuid.uuid4()
+    ajeno_id = uuid.uuid4()
+    claimed = _claimed(catalogo_id)
+    calls = FakeRepositoryCalls()
+    monkeypatch.setattr(nodes_module, "repository", calls)  # type: ignore[attr-defined]
+
+    deps = NodeDeps(
+        client=FakeGenerationClient(ajeno_id),  # type: ignore[arg-type]
+        conn=None,  # type: ignore[arg-type]
+        settings=_settings(),
+        claimed=claimed,
+    )
+    graph = build_graph(deps)
+    graph.invoke(_initial_state(claimed))
+
+    assert calls.completed == []
+    assert len(calls.failed) == 1
+    assert calls.failed[0]["attempt_state"] == "SALIDA_INVALIDA"
+    assert "no pertenece al catalogo" in calls.failed[0]["error_code"]

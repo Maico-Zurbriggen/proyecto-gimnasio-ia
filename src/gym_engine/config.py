@@ -32,12 +32,22 @@ class Settings(BaseSettings):
 
     poller_interval_seconds: float = 2.0
 
+    contract_version: str = "generative/generar-rutina@1"
+    configuration_version: str = "generative/generar-rutina@1"
+
     @property
     def expected_api_key(self) -> str | None:
         """Clave que debe traer el header X-API-Key, según el ambiente."""
         if self.app_env == "production":
             return self.ai_service_api_key_production
         return self.ai_service_api_key_test
+
+    @property
+    def model_version(self) -> str:
+        """Identificador del modelo activo, según LLM_PROVIDER."""
+        if self.llm_provider == "openai":
+            return self.openai_model
+        return self.ollama_model
 
 
 @lru_cache

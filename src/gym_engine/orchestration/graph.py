@@ -53,12 +53,8 @@ def build_graph(deps: NodeDeps) -> CompiledStateGraph:
     graph.add_edge("generar_rutina", "validar_estructura")
     graph.add_conditional_edges(
         "validar_estructura",
-        nodes.build_route_after_validation(deps),
-        {
-            "persistir_resultado": "persistir_resultado",
-            "generar_rutina": "generar_rutina",
-            "via_fallida": "via_fallida",
-        },
+        nodes.route_after_validation,
+        {"persistir_resultado": "persistir_resultado", "via_fallida": "via_fallida"},
     )
     graph.add_edge("persistir_resultado", END)
     graph.add_edge("via_fallida", END)

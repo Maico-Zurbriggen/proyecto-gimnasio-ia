@@ -1,30 +1,25 @@
 from collections.abc import Iterator
-from functools import lru_cache
 
-from sqlalchemy import Engine, create_engine
-from sqlalchemy.orm import Session, sessionmaker
+import psycopg
+from psycopg.rows import DictRow, dict_row
 
 from gym_engine.config import Settings, get_settings
 
 
-@lru_cache
-def get_engine(settings: Settings | None = None) -> Engine:
+def get_connection(settings: Settings | None = None) -> psycopg.Connection[DictRow]:
     settings = settings or get_settings()
-    return create_engine(settings.database_url, pool_pre_ping=True)
+    return psycopg.connect(settings.database_url, row_factory=dict_row)
 
 
-def get_session_factory(engine: Engine | None = None) -> sessionmaker[Session]:
-    return sessionmaker(bind=engine or get_engine(), expire_on_commit=False)
-
-
-def session_scope(session_factory: sessionmaker[Session] | None = None) -> Iterator[Session]:
-    factory = session_factory or get_session_factory()
-    session = factory()
+def connection_scope(
+    settings: Settings | None = None,
+) -> Iterator[psycopg.Connection[DictRow]]:
+    conn = get_connection(settings)
     try:
-        yield session
-        session.commit()
+        yield conn
+        conn.commit()
     except Exception:
-        session.rollback()
+        conn.rollback()
         raise
     finally:
-        session.close()
+        conn.close()

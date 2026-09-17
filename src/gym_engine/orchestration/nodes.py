@@ -1,24 +1,32 @@
 """Nodos del grafo reducido (sin HITL, sin tool-calling, sin checkpointer en esta corrida).
 
-prefiltrar_catalogo y armar_contexto ya no consultan nada: sólo validan lo que llegó en la
+prefiltrar_catalogo y armar_contexto no consultan nada: solo validan lo que llego en la
 solicitud, porque el servicio de IA no tiene acceso a tablas de dominio (AGENTS.md).
+
+Sin retry interno: cada invocacion del grafo corresponde a UN claim = UNA fila de
+ai_generation_attempts (esquema real, ver persistence/repository.py). Si algo falla,
+persistir_fallo decide si la solicitud vuelve a PENDIENTE (el poller la reclama de nuevo
+en su proximo tick, abriendo un intento nuevo) o se agota (NO_DISPONIBLE) -- eso reemplaza
+al loop-back generar_rutina<->validar_estructura que tenia la version anterior.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy.orm import Session
+import psycopg
+from psycopg.rows import DictRow
 
 from gym_engine.config import Settings
 from gym_engine.llm.client import LlmClient, LlmInvalidOutput, LlmUnavailable
 from gym_engine.llm.schemas import ParametrosRutina, RutinaEstructurada
 from gym_engine.orchestration.state import GraphState
 from gym_engine.persistence import repository
-
-VERSION_PROMPT = "generative/generar-rutina@1"
+from gym_engine.persistence.models import ClaimedGeneration
 
 NodeFn = Callable[[GraphState], dict[str, Any]]
 RouterFn = Callable[[GraphState], str]
@@ -27,11 +35,12 @@ RouterFn = Callable[[GraphState], str]
 @dataclass
 class NodeDeps:
     client: LlmClient
-    session: Session
+    conn: psycopg.Connection[DictRow]
     settings: Settings
+    claimed: ClaimedGeneration
 
     @property
-    def max_intentos(self) -> int:
+    def max_attempts(self) -> int:
         return self.settings.generation_max_retries + 1
 
 
@@ -43,25 +52,33 @@ def entry_router(state: GraphState) -> str:
 
 def build_interpretar_solicitud(deps: NodeDeps) -> NodeFn:
     def interpretar_solicitud(state: GraphState) -> dict[str, Any]:
-        attempt = repository.record_attempt(
-            deps.session,
-            request_id=state["request_id"],
-            node="interpretar_solicitud",
-            attempt_number=1,
-        )
         prompt = (
             "Interpretá el siguiente pedido de rutina en lenguaje natural y devolvé los "
             f"parámetros estructurados. Pedido: {state['texto_libre']}"
         )
         try:
             parametros = deps.client.generate_structured(prompt, ParametrosRutina)
-        except (LlmUnavailable, LlmInvalidOutput) as exc:
-            repository.finish_attempt(deps.session, attempt, error=str(exc))
-            return {"ruta": "FALLIDA", "violaciones": [f"interpretar_solicitud: {exc}"]}
-        repository.finish_attempt(deps.session, attempt)
+        except LlmUnavailable as exc:
+            return {
+                "ruta": "FALLIDA",
+                "violaciones": [f"interpretar_solicitud: {exc}"],
+                "attempt_state": "FALLIDO",
+            }
+        except LlmInvalidOutput as exc:
+            return {
+                "ruta": "FALLIDA",
+                "violaciones": [f"interpretar_solicitud: {exc}"],
+                "attempt_state": "SALIDA_INVALIDA",
+            }
         return {"parametros": parametros}
 
     return interpretar_solicitud
+
+
+def route_after_interpretar(state: GraphState) -> str:
+    if state.get("ruta") == "FALLIDA":
+        return "via_fallida"
+    return "validar_parametros"
 
 
 def validar_parametros(state: GraphState) -> dict[str, Any]:
@@ -92,15 +109,15 @@ def armar_contexto(state: GraphState) -> dict[str, Any]:
     return {}
 
 
+def early_exit_router(state: GraphState) -> str:
+    """Usado tras validar_parametros / prefiltrar_catalogo / armar_contexto."""
+    if state.get("violaciones"):
+        return "via_fallida"
+    return "continue"
+
+
 def build_generar_rutina(deps: NodeDeps) -> NodeFn:
     def generar_rutina(state: GraphState) -> dict[str, Any]:
-        intentos = state.get("intentos_generacion", 0) + 1
-        attempt = repository.record_attempt(
-            deps.session,
-            request_id=state["request_id"],
-            node="generar_rutina",
-            attempt_number=intentos,
-        )
         catalogo = state["catalogo_prefiltrado"]
         contexto = state["contexto_minimizado"]
         parametros = state["parametros"]
@@ -119,17 +136,14 @@ def build_generar_rutina(deps: NodeDeps) -> NodeFn:
         )
         try:
             estructura = deps.client.generate_structured(prompt, RutinaEstructurada)
-        except (LlmUnavailable, LlmInvalidOutput) as exc:
-            repository.finish_attempt(deps.session, attempt, error=str(exc))
-            return {"intentos_generacion": intentos, "violaciones": [f"generar_rutina: {exc}"]}
-        repository.finish_attempt(deps.session, attempt)
-        return {
-            "intentos_generacion": intentos,
-            "estructura_candidata": estructura,
-            "version_modelo": deps.settings.ollama_model,
-            "version_prompt": VERSION_PROMPT,
-            "violaciones": [],
-        }
+        except LlmUnavailable as exc:
+            return {"violaciones": [f"generar_rutina: {exc}"], "attempt_state": "FALLIDO"}
+        except LlmInvalidOutput as exc:
+            return {
+                "violaciones": [f"generar_rutina: {exc}"],
+                "attempt_state": "SALIDA_INVALIDA",
+            }
+        return {"estructura_candidata": estructura, "violaciones": []}
 
     return generar_rutina
 
@@ -157,30 +171,28 @@ def validar_estructura(state: GraphState) -> dict[str, Any]:
     return {"violaciones": violaciones}
 
 
-def build_route_after_validation(deps: NodeDeps) -> RouterFn:
-    def route_after_validation(state: GraphState) -> str:
-        if not state.get("violaciones"):
-            return "persistir_resultado"
-        if state.get("intentos_generacion", 0) < deps.max_intentos:
-            return "generar_rutina"
-        return "via_fallida"
-
-    return route_after_validation
+def route_after_validation(state: GraphState) -> str:
+    if not state.get("violaciones"):
+        return "persistir_resultado"
+    return "via_fallida"
 
 
 def build_persistir_resultado(deps: NodeDeps) -> NodeFn:
     def persistir_resultado(state: GraphState) -> dict[str, Any]:
         estructura = state["estructura_candidata"]
         assert estructura is not None
-        repository.save_validation(
-            deps.session, request_id=state["request_id"], valid=True, violations=[]
-        )
-        repository.save_result(
-            deps.session,
-            request_id=state["request_id"],
-            estructura_candidata=estructura.model_dump(mode="json"),
-            version_modelo=state["version_modelo"],
-            version_prompt=state["version_prompt"],
+        output = estructura.model_dump(mode="json")
+        canonical = json.dumps(
+            output, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+        output_hash = hashlib.sha256(canonical).hexdigest()
+        repository.complete(
+            deps.conn,
+            deps.claimed,
+            output=output,
+            output_hash=output_hash,
+            model_version=deps.settings.model_version,
+            configuration_version=deps.settings.configuration_version,
         )
         return {}
 
@@ -190,31 +202,18 @@ def build_persistir_resultado(deps: NodeDeps) -> NodeFn:
 def build_via_fallida(deps: NodeDeps) -> NodeFn:
     def via_fallida(state: GraphState) -> dict[str, Any]:
         violaciones = state.get("violaciones") or ["fallo no especificado"]
-        repository.save_validation(
-            deps.session,
-            request_id=state["request_id"],
-            valid=False,
-            violations=violaciones,
-        )
-        repository.mark_failed(
-            deps.session, request_id=state["request_id"], error="; ".join(violaciones)
+        attempt_state = state.get("attempt_state") or "SALIDA_INVALIDA"
+        error_code = "; ".join(violaciones)
+        repository.fail(
+            deps.conn,
+            deps.claimed,
+            attempt_state=attempt_state,
+            error_code=error_code,
+            max_attempts=deps.max_attempts,
         )
         return {"ruta": "FALLIDA"}
 
     return via_fallida
-
-
-def route_after_interpretar(state: GraphState) -> str:
-    if state.get("ruta") == "FALLIDA":
-        return "via_fallida"
-    return "validar_parametros"
-
-
-def early_exit_router(state: GraphState) -> str:
-    """Usado tras validar_parametros / prefiltrar_catalogo / armar_contexto."""
-    if state.get("violaciones"):
-        return "via_fallida"
-    return "continue"
 
 
 __all__ = [
@@ -225,10 +224,10 @@ __all__ = [
     "validar_parametros",
     "prefiltrar_catalogo",
     "armar_contexto",
+    "early_exit_router",
     "build_generar_rutina",
     "validar_estructura",
-    "build_route_after_validation",
+    "route_after_validation",
     "build_persistir_resultado",
     "build_via_fallida",
-    "early_exit_router",
 ]
