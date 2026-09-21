@@ -41,7 +41,7 @@ cp .env.example .env
 python -m uvicorn app:app --reload --port 8000
 ```
 
-En PowerShell, usar `Copy-Item .env.example .env`. Backend es dueño de las migraciones; este repositorio no ejecuta cambios de esquema.
+En PowerShell, usar `Copy-Item .env.example .env`. En Windows, uvicorn debe arrancar con `--loop asyncio:SelectorEventLoop`: el loop Proactor por defecto es incompatible con `psycopg.AsyncConnection` y `/ready` reporta `database: down` aunque la base esté accesible. Backend es dueño de las migraciones; este repositorio no ejecuta cambios de esquema.
 
 Endpoints:
 
