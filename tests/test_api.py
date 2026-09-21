@@ -8,7 +8,16 @@ import gym_engine.api.routes as routes_module
 from gym_engine.api.app import create_app
 from gym_engine.api.auth import verify_api_key
 from gym_engine.api.routes import get_connection_dep
+from gym_engine.config import Settings, get_settings
 from tests.conftest import FakeConnection, FakeRepository
+
+
+def _test_settings() -> Settings:
+    return Settings(
+        _env_file=None,
+        database_url="postgresql://example.invalid/gym-test",
+        ai_service_api_key="service-secret",
+    )
 
 
 @pytest.fixture
@@ -21,6 +30,7 @@ def client(
     app = create_app()
     app.dependency_overrides[get_connection_dep] = lambda: fake_connection
     app.dependency_overrides[verify_api_key] = lambda: None
+    app.dependency_overrides[get_settings] = _test_settings
     with TestClient(app) as test_client:
         yield test_client
 
@@ -124,21 +134,9 @@ def test_health_does_not_require_dependencies() -> None:
     assert response.json() == {"status": "ok"}
 
 
-def _ready_settings() -> object:
-    from gym_engine.config import Settings
-
-    return Settings(
-        _env_file=None,
-        database_url="postgresql://example.invalid/gym-test",
-        ai_service_api_key="service-secret",
-    )
-
-
 def test_ready_requires_service_authentication() -> None:
-    from gym_engine.config import get_settings
-
     app = create_app()
-    app.dependency_overrides[get_settings] = _ready_settings
+    app.dependency_overrides[get_settings] = _test_settings
 
     response = TestClient(app).get("/ready")
 
@@ -146,10 +144,8 @@ def test_ready_requires_service_authentication() -> None:
 
 
 def test_ready_accepts_bearer_authorization() -> None:
-    from gym_engine.config import get_settings
-
     app = create_app()
-    app.dependency_overrides[get_settings] = _ready_settings
+    app.dependency_overrides[get_settings] = _test_settings
 
     response = TestClient(app).get("/ready", headers={"Authorization": "Bearer service-secret"})
 
