@@ -14,7 +14,10 @@ dependencies = [
   "uvicorn[standard]>=0.32,<1",
   "pydantic>=2.9,<3",
   "pydantic-settings>=2.5,<3",
-  "langgraph>=0.2,<1",
+  # Pin acotado a 0.2.x a propósito: 0.6.x cambia los overloads de tipado de StateGraph.add_node
+  # (CompiledStateGraph pasa a requerir type-arg) y rompe mypy en orchestration/graph.py -- no
+  # migrado todavía, así que no dejar que un resolve sin lockfile salte de mayor.
+  "langgraph>=0.2,<0.3",
 ]
 
 [project.optional-dependencies]
@@ -49,3 +52,6 @@ python_version = "3.13"
 strict = true
 packages = ["gym_engine"]
 mypy_path = "src"
+
+[tool.vercel]
+entrypoint = "src.gym_engine.api.app:app"
