@@ -115,3 +115,45 @@ def test_get_failed_request_with_business_violations(
     response = client.get(f"/v1/routine-generations/{request_id}")
     body = response.json()
     assert body["violaciones"] == ["objetivo vacio", "frecuencia_semanal fuera de RN-38 (1-7)"]
+
+
+def test_health_does_not_require_dependencies() -> None:
+    response = TestClient(create_app()).get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def _ready_settings() -> object:
+    from gym_engine.config import Settings
+
+    return Settings(
+        _env_file=None,
+        database_url="postgresql://example.invalid/gym-test",
+        ai_service_api_key="service-secret",
+    )
+
+
+def test_ready_requires_service_authentication() -> None:
+    from gym_engine.config import get_settings
+
+    app = create_app()
+    app.dependency_overrides[get_settings] = _ready_settings
+
+    response = TestClient(app).get("/ready")
+
+    assert response.status_code == 401
+
+
+def test_ready_accepts_bearer_authorization() -> None:
+    from gym_engine.config import get_settings
+
+    app = create_app()
+    app.dependency_overrides[get_settings] = _ready_settings
+
+    response = TestClient(app).get("/ready", headers={"Authorization": "Bearer service-secret"})
+
+    # Sin Postgres real en este entorno de tests (ver docstring de conftest.py): lo que
+    # importa acá es que el header Bearer pasó la autenticación (no 401), no que la DB
+    # responda 200.
+    assert response.status_code == 503

@@ -21,6 +21,11 @@ class Settings(BaseSettings):
 
     ai_service_api_key: str | None = None
 
+    # Región de Vercel Queues (mismo nombre ya provisionado en develop); no consumida aún
+    # por este servicio -- el worker actual es un poller directo sobre PostgreSQL -- pero se
+    # preserva para no romper el deployment/env compartido con backend.
+    queue_region: str = "gru1"
+
     llm_provider: str = "ollama"  # "ollama" | "openai"
 
     llm_api_url: str = "http://127.0.0.1:11434"
