@@ -143,39 +143,39 @@ class GenerationRepository:
         async with await psycopg.AsyncConnection.connect(
             self._database_url
         ) as connection, connection.transaction():
-                await connection.execute(
-                    """
-                    INSERT INTO ai_integration.ai_generation_results (
-                      attempt_id, structured_output, output_hash,
-                      structurally_valid, retention_until
-                    )
-                    VALUES (%s, %s::jsonb, %s, true, %s)
-                    """,
-                    (
-                        claimed.attempt_id,
-                        json.dumps(output, ensure_ascii=False),
-                        output_hash,
-                        claimed.retention_until,
-                    ),
+            await connection.execute(
+                """
+                INSERT INTO ai_integration.ai_generation_results (
+                  attempt_id, structured_output, output_hash,
+                  structurally_valid, retention_until
                 )
-                await connection.execute(
-                    """
-                    UPDATE ai_integration.ai_generation_attempts
-                    SET state = 'COMPLETADO', finished_at = now(),
-                        model_version = %s, configuration_version = %s
-                    WHERE id = %s
-                    """,
-                    (model_version, configuration_version, claimed.attempt_id),
-                )
-                await connection.execute(
-                    """
-                    UPDATE ai_integration.ai_generation_requests
-                    SET state = 'COMPLETADA', finished_at = now(),
-                        lease_owner = NULL, lease_until = NULL
-                    WHERE id = %s
-                    """,
-                    (claimed.request_id,),
-                )
+                VALUES (%s, %s::jsonb, %s, true, %s)
+                """,
+                (
+                    claimed.attempt_id,
+                    json.dumps(output, ensure_ascii=False),
+                    output_hash,
+                    claimed.retention_until,
+                ),
+            )
+            await connection.execute(
+                """
+                UPDATE ai_integration.ai_generation_attempts
+                SET state = 'COMPLETADO', finished_at = now(),
+                    model_version = %s, configuration_version = %s
+                WHERE id = %s
+                """,
+                (model_version, configuration_version, claimed.attempt_id),
+            )
+            await connection.execute(
+                """
+                UPDATE ai_integration.ai_generation_requests
+                SET state = 'COMPLETADA', finished_at = now(),
+                    lease_owner = NULL, lease_until = NULL
+                WHERE id = %s
+                """,
+                (claimed.request_id,),
+            )
 
     async def fail(
         self,
@@ -189,26 +189,26 @@ class GenerationRepository:
         async with await psycopg.AsyncConnection.connect(
             self._database_url
         ) as connection, connection.transaction():
-                await connection.execute(
-                    """
-                    UPDATE ai_integration.ai_generation_attempts
-                    SET state = %s::ai_integration."AiGenerationAttemptState",
-                        finished_at = now(), error_code = %s
-                    WHERE id = %s
-                    """,
-                    (attempt_state, error_code, claimed.attempt_id),
-                )
-                await connection.execute(
-                    """
-                    UPDATE ai_integration.ai_generation_requests
-                    SET state = %s::ai_integration."AiGenerationRequestState",
-                        available_at = CASE WHEN %s THEN available_at ELSE now() END,
-                        finished_at = CASE WHEN %s THEN now() ELSE NULL END,
-                        lease_owner = NULL, lease_until = NULL
-                    WHERE id = %s
-                    """,
-                    (request_state, exhausted, exhausted, claimed.request_id),
-                )
+            await connection.execute(
+                """
+                UPDATE ai_integration.ai_generation_attempts
+                SET state = %s::ai_integration."AiGenerationAttemptState",
+                    finished_at = now(), error_code = %s
+                WHERE id = %s
+                """,
+                (attempt_state, error_code, claimed.attempt_id),
+            )
+            await connection.execute(
+                """
+                UPDATE ai_integration.ai_generation_requests
+                SET state = %s::ai_integration."AiGenerationRequestState",
+                    available_at = CASE WHEN %s THEN available_at ELSE now() END,
+                    finished_at = CASE WHEN %s THEN now() ELSE NULL END,
+                    lease_owner = NULL, lease_until = NULL
+                WHERE id = %s
+                """,
+                (request_state, exhausted, exhausted, claimed.request_id),
+            )
         return exhausted
 
 

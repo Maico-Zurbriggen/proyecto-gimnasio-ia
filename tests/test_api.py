@@ -4,6 +4,7 @@ from vercel.queue import QueueClient
 
 from gym_engine.api import app as api_module
 from gym_engine.config import Settings
+from gym_engine.llm import OllamaClient
 from gym_engine.persistence import GenerationRepository
 
 
@@ -35,6 +36,52 @@ def test_ready_requires_service_authentication(monkeypatch: MonkeyPatch) -> None
 
     assert response.status_code == 401
     assert response.json() == {"detail": "unauthorized"}
+
+
+async def _ping_ok(_self: object) -> None:
+    return None
+
+
+async def _ping_fails(_self: object) -> None:
+    raise ConnectionError("unreachable")
+
+
+def test_ready_reports_llm_down_when_database_is_up(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(api_module, "get_settings", settings)
+    monkeypatch.setattr(GenerationRepository, "ping", _ping_ok)
+    monkeypatch.setattr(OllamaClient, "ping", _ping_fails)
+
+    response = TestClient(api_module.app).get(
+        "/ready", headers={"Authorization": "Bearer service-secret"}
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": {
+            "code": "dependency_unavailable",
+            "database": "up",
+            "llm": "down",
+        }
+    }
+
+
+def test_ready_reports_database_down_when_llm_is_up(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(api_module, "get_settings", settings)
+    monkeypatch.setattr(GenerationRepository, "ping", _ping_fails)
+    monkeypatch.setattr(OllamaClient, "ping", _ping_ok)
+
+    response = TestClient(api_module.app).get(
+        "/ready", headers={"Authorization": "Bearer service-secret"}
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": {
+            "code": "dependency_unavailable",
+            "database": "down",
+            "llm": "up",
+        }
+    }
 
 
 def test_dispatches_only_an_existing_request(monkeypatch: MonkeyPatch) -> None:

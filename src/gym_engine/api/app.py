@@ -54,16 +54,38 @@ def create_app() -> FastAPI:
     async def ready() -> dict[str, str]:
         try:
             settings = get_settings()
+        except Exception as error:
+            raise HTTPException(
+                status_code=503, detail="service_not_configured"
+            ) from error
+
+        database_up = True
+        try:
             await GenerationRepository(settings.database_url).ping()
+        except Exception:
+            database_up = False
+
+        llm_up = True
+        try:
             await OllamaClient(
                 settings.llm_api_url,
                 settings.llm_model,
                 settings.llm_api_token,
                 settings.timeout_seconds,
             ).ping()
-        except Exception as error:
-            raise HTTPException(status_code=503, detail="dependency_unavailable") from error
-        return {"status": "ready", "database": "up", "llm": "up"}
+        except Exception:
+            llm_up = False
+
+        if database_up and llm_up:
+            return {"status": "ready", "database": "up", "llm": "up"}
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "dependency_unavailable",
+                "database": "up" if database_up else "down",
+                "llm": "up" if llm_up else "down",
+            },
+        )
 
     @application.post(
         "/v1/generation-requests/{request_id}/dispatch",

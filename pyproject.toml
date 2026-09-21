@@ -51,4 +51,4 @@ packages = ["gym_engine"]
 mypy_path = "src"
 
 [[tool.vercel.subscribers]]
-entrypoint = "src.gym_engine.worker.generation"
+entrypoint = "gym_engine.worker.generation"
