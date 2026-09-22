@@ -32,6 +32,25 @@ from gym_engine.persistence.models import ClaimedGeneration
 NodeFn = Callable[[GraphState], dict[str, Any]]
 RouterFn = Callable[[GraphState], str]
 
+_TYPE_RULES = {
+    "fuerza": (
+        "3-5 series de trabajo, 3-6 repeticiones, 180-300 s de descanso y "
+        "4-6 ejercicios por día"
+    ),
+    "hipertrofia": (
+        "3-4 series de trabajo, 6-12 repeticiones, 60-120 s de descanso y "
+        "5-8 ejercicios por día"
+    ),
+    "resistencia_muscular": (
+        "2-4 series de trabajo, 12-20 repeticiones, 30-60 s de descanso y "
+        "5-8 ejercicios por día"
+    ),
+    "acondicionamiento_general": (
+        "2-3 series de trabajo, 8-15 repeticiones, 45-90 s de descanso y "
+        "5-8 ejercicios por día"
+    ),
+}
+
 
 @dataclass
 class NodeDeps:
@@ -129,11 +148,17 @@ def build_generar_rutina(deps: NodeDeps) -> NodeFn:
             f"(id y nombre): {ids_disponibles}. "
             f"Objetivo: {parametros.objetivo}. "
             f"Frecuencia semanal: {parametros.frecuencia_semanal}. "
+            f"Reglas obligatorias: {_TYPE_RULES[parametros.objetivo]}. "
+            "La cantidad de días debe coincidir con la frecuencia semanal. La rutina completa "
+            "debe cubrir empuje horizontal, tracción horizontal o vertical, dominante de rodilla "
+            "y dominante de cadera. "
             f"Duracion por sesion (min): {parametros.duracion_minutos}. "
             f"Restricciones: {parametros.restricciones}. "
             f"Contexto del alumno: nivel={contexto.nivel_experiencia}, "
             f"dias_disponibles={contexto.dias_semanales_disponibles}, "
-            f"condiciones={contexto.condiciones}."
+            f"condiciones={contexto.condiciones}. "
+            "Expresa carga_sugerida exclusivamente como número de kilogramos; usa 0 "
+            "cuando el ejercicio no requiera carga externa."
         )
         try:
             estructura = deps.client.generate_structured(prompt, RutinaEstructurada)
@@ -181,8 +206,14 @@ def route_after_validation(state: GraphState) -> str:
 def build_persistir_resultado(deps: NodeDeps) -> NodeFn:
     def persistir_resultado(state: GraphState) -> dict[str, Any]:
         estructura = state["estructura_candidata"]
+        parametros = state["parametros"]
         assert estructura is not None
-        output = estructura.model_dump(mode="json")
+        assert parametros is not None
+        output = {
+            "tipo_rutina": parametros.objetivo.upper(),
+            "frecuencia_semanal": parametros.frecuencia_semanal,
+            **estructura.model_dump(mode="json"),
+        }
         canonical = json.dumps(
             output, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         ).encode()

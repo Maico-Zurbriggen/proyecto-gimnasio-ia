@@ -1,3 +1,8 @@
+from __future__ import annotations
+
+import json
+from typing import Any
+
 import httpx
 import pytest
 
@@ -8,8 +13,9 @@ from gym_engine.llm.client import (
     OllamaClient,
     OpenAiClient,
     build_llm_client,
+    ollama_format_schema,
 )
-from gym_engine.llm.schemas import ParametrosRutina
+from gym_engine.llm.schemas import ParametrosRutina, RutinaEstructurada
 
 
 def _settings() -> Settings:
@@ -27,10 +33,27 @@ def test_generate_structured_success(monkeypatch: pytest.MonkeyPatch) -> None:
         objetivo="fuerza", frecuencia_semanal=4, duracion_minutos=50
     ).model_dump_json()
 
-    def fake_post(url: str, **kwargs: object) -> httpx.Response:
-        return httpx.Response(200, json={"response": body}, request=httpx.Request("POST", url))
+    class FakeStream:
+        def __enter__(self) -> FakeStream:
+            return self
 
-    monkeypatch.setattr("gym_engine.llm.client.httpx.post", fake_post)
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def iter_lines(self) -> list[str]:
+            half = len(body) // 2
+            return [
+                json.dumps({"response": body[:half], "done": False}),
+                json.dumps({"response": body[half:], "done": True}),
+            ]
+
+    def fake_stream(*_args: object, **_kwargs: object) -> FakeStream:
+        return FakeStream()
+
+    monkeypatch.setattr("gym_engine.llm.client.httpx.stream", fake_stream)
 
     client = OllamaClient(_settings())
     result = client.generate_structured("prompt", ParametrosRutina)
@@ -42,10 +65,11 @@ def test_generate_structured_success(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_generate_structured_timeout_raises_llm_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fake_post(url: str, **kwargs: object) -> httpx.Response:
+    def fake_stream(*_args: object, **_kwargs: object) -> Any:
         raise httpx.TimeoutException("timeout", request=httpx.Request("POST", url))
 
-    monkeypatch.setattr("gym_engine.llm.client.httpx.post", fake_post)
+    url = "http://ollama.local/api/generate"
+    monkeypatch.setattr("gym_engine.llm.client.httpx.stream", fake_stream)
 
     client = OllamaClient(_settings())
     with pytest.raises(LlmUnavailable):
@@ -55,16 +79,42 @@ def test_generate_structured_timeout_raises_llm_unavailable(
 def test_generate_structured_invalid_json_raises_llm_invalid_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fake_post(url: str, **kwargs: object) -> httpx.Response:
-        return httpx.Response(
-            200, json={"response": "{not valid}"}, request=httpx.Request("POST", url)
-        )
+    class FakeStream:
+        def __enter__(self) -> FakeStream:
+            return self
 
-    monkeypatch.setattr("gym_engine.llm.client.httpx.post", fake_post)
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def iter_lines(self) -> list[str]:
+            return [json.dumps({"response": "{not valid}", "done": True})]
+
+    monkeypatch.setattr(
+        "gym_engine.llm.client.httpx.stream",
+        lambda *_args, **_kwargs: FakeStream(),
+    )
 
     client = OllamaClient(_settings())
     with pytest.raises(LlmInvalidOutput):
         client.generate_structured("prompt", ParametrosRutina)
+
+
+def test_ollama_format_schema_inlines_refs_and_drops_unsupported_keys() -> None:
+    formatted = ollama_format_schema(RutinaEstructurada)
+
+    def find_keys(node: Any) -> set[str]:
+        if isinstance(node, dict):
+            return set(node).union(*(find_keys(value) for value in node.values()))
+        if isinstance(node, list):
+            return set().union(*(find_keys(value) for value in node))
+        return set()
+
+    assert find_keys(formatted).isdisjoint(
+        {"$ref", "$defs", "minLength", "maxLength"}
+    )
 
 
 def _openai_settings() -> Settings:
