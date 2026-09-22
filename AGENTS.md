@@ -20,6 +20,7 @@ La documentación canónica vive en `Maico-Zurbriggen/proyecto-gimnasio-document
 - Tras el segundo fallo registrar indisponibilidad; no generar fallback determinístico.
 - Limitar inicialmente la concurrencia del consumidor a uno para proteger Ollama.
 - El conector a Ollama usa exclusivamente el dominio HTTPS estable de Cloudflare Tunnel y envía `LLM_API_TOKEN` como Bearer; nunca exponer Ollama sin protección.
+- `LLM_PROVIDER` admite `ollama` u `openai`; para OpenAI usar `OPENAI_API_KEY` (no el Bearer de Cloudflare Tunnel, exclusivo del conector Ollama).
 
 ## Datos y seguridad
 
