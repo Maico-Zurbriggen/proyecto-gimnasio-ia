@@ -1,53 +1,74 @@
-from __future__ import annotations
+from functools import lru_cache
 
-import os
-from dataclasses import dataclass
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from dotenv import load_dotenv
-
-load_dotenv(".env.local")
-load_dotenv()
-
-class ConfigurationError(RuntimeError):
-    pass
+# Identificador fijo del contrato de salida (RutinaEstructurada), no configuracion de
+# deployment -- develop usa el mismo patron (contract_version hardcodeado en service.py),
+# y comparten la misma tabla ai_generation_attempts.contract_version, asi que conviene
+# el mismo valor para no fragmentar el campo entre dos convenciones distintas.
+CONTRACT_VERSION = "routine-generation@1.0"
 
 
-def _required(name: str) -> str:
-    value = os.getenv(name, "").strip()
-    if not value:
-        raise ConfigurationError(f"Missing required environment variable: {name}")
-    return value
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 
+    app_env: str = "test"
+    api_host: str = "127.0.0.1"
+    api_port: int = 8000
 
-@dataclass(frozen=True)
-class Settings:
-    app_env: str
     database_url: str
-    api_key: str
-    queue_region: str
-    llm_api_url: str
-    llm_model: str
-    llm_api_token: str
-    configuration_version: str
-    timeout_seconds: int
-    max_attempts: int
 
-    @classmethod
-    def from_env(cls) -> Settings:
-        retries = int(os.getenv("GENERATION_MAX_RETRIES", "1"))
-        if retries != 1:
-            raise ConfigurationError("GENERATION_MAX_RETRIES must be 1")
-        return cls(
-            app_env=os.getenv("APP_ENV", "test").strip(),
-            database_url=_required("DATABASE_URL"),
-            api_key=_required("AI_SERVICE_API_KEY"),
-            queue_region=os.getenv("QUEUE_REGION", "gru1").strip(),
-            llm_api_url=_required("LLM_API_URL").rstrip("/"),
-            llm_model=_required("LLM_MODEL"),
-            llm_api_token=_required("LLM_API_TOKEN"),
-            configuration_version=os.getenv(
-                "LLM_CONFIGURATION_VERSION", "generative/generar-rutina@1"
-            ).strip(),
-            timeout_seconds=int(os.getenv("GENERATION_TIMEOUT_SECONDS", "120")),
-            max_attempts=retries + 1,
-        )
+    ai_service_api_key: str | None = None
+
+    # Región de Vercel Queues (mismo nombre ya provisionado en develop). La usa el poller
+    # local en modo poll (worker/poller.py); el consumer push en Vercel (queue_consumer.py)
+    # no la necesita porque VERCEL_REGION ya viene provisto por la plataforma.
+    queue_region: str = "gru1"
+
+    llm_provider: str = "ollama"  # "ollama" | "openai"
+
+    llm_api_url: str = "http://127.0.0.1:11434"
+    # alias LLM_API_TOKEN: asi esta provisionado el secreto real (Cloudflare Tunnel), no
+    # LLM_API_KEY.
+    llm_api_token: str | None = Field(default=None, validation_alias="LLM_API_TOKEN")
+    # alias LLM_MODEL: idem, es el nombre real del secreto para el modelo de Ollama.
+    ollama_model: str = Field(default="llama3.1", validation_alias="LLM_MODEL")
+
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-4o-mini"
+    openai_base_url: str = "https://api.openai.com/v1"
+
+    generation_timeout_seconds: int = 120
+    generation_max_retries: int = 1
+    failed_result_retention_days: int = 30
+
+    poller_interval_seconds: float = 2.0
+
+    # distinto del de develop a proposito: cada implementacion tiene su propio prompt,
+    # asi que su version no puede compartir identificador con la de develop sin mentir
+    # sobre que produjo el resultado (RF-072).
+    configuration_version: str = Field(
+        default="generative/generar-rutina@1", validation_alias="LLM_CONFIGURATION_VERSION"
+    )
+
+    @property
+    def expected_api_key(self) -> str | None:
+        """Clave que debe traer el header X-API-Key.
+
+        Una sola clave por deployment (no por app_env adentro del proceso): Vercel ya
+        separa test/producción con secretos distintos por environment.
+        """
+        return self.ai_service_api_key
+
+    @property
+    def model_version(self) -> str:
+        """Identificador del modelo activo, según LLM_PROVIDER."""
+        if self.llm_provider == "openai":
+            return self.openai_model
+        return self.ollama_model
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()  # type: ignore[call-arg]
