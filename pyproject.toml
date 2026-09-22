@@ -58,4 +58,4 @@ mypy_path = "src"
 entrypoint = "src.gym_engine.api.app:app"
 
 [[tool.vercel.subscribers]]
-entrypoint = "gym_engine.worker.queue_consumer"
+entrypoint = "src.gym_engine.worker.queue_consumer"
