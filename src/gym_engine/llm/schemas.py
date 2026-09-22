@@ -1,3 +1,4 @@
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -32,7 +33,12 @@ class ParametrosRutina(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    objetivo: str
+    objetivo: Literal[
+        "fuerza",
+        "hipertrofia",
+        "resistencia_muscular",
+        "acondicionamiento_general",
+    ]
     frecuencia_semanal: int = Field(ge=1, le=7)
     duracion_minutos: int = Field(gt=0)
     restricciones: list[str] = Field(default_factory=list)
@@ -42,11 +48,13 @@ class ParametrosRutina(BaseModel):
 class SeriePrescriptaCandidata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    orden: int
-    repeticiones_min: int = Field(gt=0)
-    repeticiones_max: int = Field(gt=0)
-    carga_sugerida: str | None = None
-    descanso_segundos: int = Field(ge=0)
+    orden: int = Field(gt=0)
+    repeticiones_min: int = Field(ge=1, le=100)
+    repeticiones_max: int = Field(ge=1, le=100)
+    # Kilogramos. Cero representa ejercicios sin carga externa; PostgreSQL
+    # conserva este campo como decimal no nulo en la prescripcion final.
+    carga_sugerida: float = Field(default=0, ge=0, le=1000)
+    descanso_segundos: int = Field(ge=0, le=600)
     es_calentamiento: bool = False
 
 
@@ -54,7 +62,7 @@ class EjercicioRutinaCandidato(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     ejercicio_id: UUID
-    orden: int
+    orden: int = Field(gt=0)
     nota: str | None = None
     series: list[SeriePrescriptaCandidata] = Field(min_length=1)
 
@@ -62,7 +70,7 @@ class EjercicioRutinaCandidato(BaseModel):
 class DiaRutinaCandidato(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    orden: int
+    orden: int = Field(gt=0)
     nombre: str
     ejercicios: list[EjercicioRutinaCandidato] = Field(min_length=1)
 
@@ -72,4 +80,4 @@ class RutinaEstructurada(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    dias: list[DiaRutinaCandidato] = Field(min_length=1)
+    dias: list[DiaRutinaCandidato] = Field(min_length=1, max_length=7)

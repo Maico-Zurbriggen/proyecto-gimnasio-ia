@@ -154,7 +154,10 @@ def test_process_completes_and_calls_repository_complete(
     assert len(calls.completed) == 1
     assert calls.failed == []
     output = calls.completed[0]["output"]
+    assert output["tipo_rutina"] == "FUERZA"
+    assert output["frecuencia_semanal"] == 3
     assert output["dias"][0]["ejercicios"][0]["ejercicio_id"] == str(ejercicio_id)
+    assert output["dias"][0]["ejercicios"][0]["series"][0]["carga_sugerida"] == 0
 
 
 def test_process_fails_when_llm_returns_exercise_outside_catalog(
