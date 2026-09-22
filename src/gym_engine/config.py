@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # deployment -- develop usa el mismo patron (contract_version hardcodeado en service.py),
 # y comparten la misma tabla ai_generation_attempts.contract_version, asi que conviene
 # el mismo valor para no fragmentar el campo entre dos convenciones distintas.
-CONTRACT_VERSION = "routine-generation@1.0"
+CONTRACT_VERSION = "routine-generation@1.1"
 
 
 class Settings(BaseSettings):

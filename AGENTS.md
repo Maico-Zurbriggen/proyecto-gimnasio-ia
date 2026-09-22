@@ -12,7 +12,7 @@ La documentación canónica vive en `Maico-Zurbriggen/proyecto-gimnasio-document
 - Publicar OpenAPI versionado como fuente de verdad para backend.
 - Aceptar solicitudes idempotentes con `202`; nunca esperar al LLM dentro de la petición.
 - Desplegar API y consumidor en Vercel; procesar mediante Vercel Queues y conservar lease e idempotencia en PostgreSQL.
-- Recibir del backend sólo el UUID de una solicitud que ya existe en `ai_integration`.
+- Recibir del backend una solicitud idempotente con contexto minimizado y catálogo prescribible prefiltrado; persistirla en `ai_integration` y publicar sólo su UUID en la cola.
 - Llamar al LLM sólo mediante un conector privado y validar su salida estructural.
 - Escribir únicamente estados y resultados en estructuras de integración acordadas.
 - No crear, aprobar, asignar ni activar rutinas; backend conserva reglas y autoridad.

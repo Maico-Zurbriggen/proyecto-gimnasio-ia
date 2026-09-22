@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Protocol, TypeVar
+import copy
+import json
+from typing import Any, Protocol, TypeVar, cast
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -8,6 +10,52 @@ from pydantic import BaseModel, ValidationError
 from gym_engine.config import Settings
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
+
+OLLAMA_UNSUPPORTED_SCHEMA_KEYS = frozenset({"minLength", "maxLength"})
+
+
+def _inline_schema_refs(node: Any, definitions: dict[str, Any]) -> Any:
+    if isinstance(node, dict):
+        if set(node) == {"$ref"}:
+            target = node["$ref"]
+            if isinstance(target, str) and target.startswith("#/$defs/"):
+                name = target.rsplit("/", 1)[1]
+                return _inline_schema_refs(copy.deepcopy(definitions[name]), definitions)
+            return dict(node)
+        return {
+            key: _inline_schema_refs(value, definitions)
+            for key, value in node.items()
+            if key != "$defs"
+        }
+    if isinstance(node, list):
+        return [_inline_schema_refs(value, definitions) for value in node]
+    return node
+
+
+def _strip_schema_keys(node: Any, keys: frozenset[str]) -> Any:
+    if isinstance(node, dict):
+        return {
+            key: _strip_schema_keys(value, keys)
+            for key, value in node.items()
+            if key not in keys
+        }
+    if isinstance(node, list):
+        return [_strip_schema_keys(value, keys) for value in node]
+    return node
+
+
+def ollama_format_schema(schema: type[BaseModel]) -> dict[str, Any]:
+    """Adapta JSON Schema al subconjunto aceptado por Ollama.
+
+    La validacion final sigue usando el modelo Pydantic completo; relajar la
+    guia de generacion no relaja el contrato que acepta el servicio.
+    """
+    raw = schema.model_json_schema()
+    inlined = _inline_schema_refs(raw, raw.get("$defs", {}))
+    return cast(
+        dict[str, Any],
+        _strip_schema_keys(inlined, OLLAMA_UNSUPPORTED_SCHEMA_KEYS),
+    )
 
 
 class LlmUnavailable(Exception):
@@ -40,21 +88,32 @@ class OllamaClient:
         payload = {
             "model": self._model,
             "prompt": prompt,
-            "format": schema.model_json_schema(),
-            "stream": False,
+            "format": ollama_format_schema(schema),
+            "stream": True,
         }
         try:
-            response = httpx.post(
+            with httpx.stream(
+                "POST",
                 f"{self._base_url}/api/generate",
                 json=payload,
                 headers=self._headers(),
                 timeout=self._timeout,
-            )
-            response.raise_for_status()
+            ) as response:
+                response.raise_for_status()
+                chunks: list[str] = []
+                for line in response.iter_lines():
+                    if not line.strip():
+                        continue
+                    chunk = json.loads(line)
+                    value = chunk.get("response", "")
+                    if isinstance(value, str):
+                        chunks.append(value)
         except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError) as exc:
             raise LlmUnavailable(str(exc)) from exc
+        except (json.JSONDecodeError, AttributeError) as exc:
+            raise LlmInvalidOutput(str(exc)) from exc
 
-        raw = response.json().get("response", "")
+        raw = "".join(chunks)
         try:
             return schema.model_validate_json(raw)
         except ValidationError as exc:

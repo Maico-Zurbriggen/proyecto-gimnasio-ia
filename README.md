@@ -69,6 +69,10 @@ Endpoints:
 - `GET /v1/routine-generations/{request_id}`: consulta el estado y, si está completa, la
   estructura candidata.
 
+El contrato `routine-generation@1.1` persiste también `tipo_rutina` y
+`frecuencia_semanal`; cada `carga_sugerida` es un número de kilogramos entre 0 y 1000. Backend
+conserva la autoridad para revalidar la salida y crear la rutina `PROPUESTA`.
+
 Ambos endpoints de negocio requieren `X-API-Key` o `Authorization: Bearer` con el mismo secreto
 (`AI_SERVICE_API_KEY`) — se aceptan los dos esquemas mientras conviven clientes que usan uno u
 otro.
