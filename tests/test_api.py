@@ -7,9 +7,9 @@ from fastapi.testclient import TestClient
 import gym_engine.api.routes as routes_module
 from gym_engine.api.app import create_app
 from gym_engine.api.auth import verify_api_key
-from gym_engine.api.routes import get_connection_dep
+from gym_engine.api.routes import get_connection_dep, get_queue_client
 from gym_engine.config import Settings, get_settings
-from tests.conftest import FakeConnection, FakeRepository
+from tests.conftest import FakeConnection, FakeQueueClient, FakeRepository
 
 
 def _test_settings() -> Settings:
@@ -24,6 +24,7 @@ def _test_settings() -> Settings:
 def client(
     fake_repository: FakeRepository,
     fake_connection: FakeConnection,
+    fake_queue_client: FakeQueueClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[TestClient]:
     monkeypatch.setattr(routes_module, "repository", fake_repository)
@@ -31,6 +32,7 @@ def client(
     app.dependency_overrides[get_connection_dep] = lambda: fake_connection
     app.dependency_overrides[verify_api_key] = lambda: None
     app.dependency_overrides[get_settings] = _test_settings
+    app.dependency_overrides[get_queue_client] = lambda: fake_queue_client
     with TestClient(app) as test_client:
         yield test_client
 
@@ -49,19 +51,26 @@ def _payload(idempotency_key: str = "idem-1") -> dict:
     }
 
 
-def test_create_returns_202_and_pending(client: TestClient) -> None:
+def test_create_returns_202_and_pending(
+    client: TestClient, fake_queue_client: FakeQueueClient
+) -> None:
     response = client.post("/v1/routine-generations", json=_payload())
     assert response.status_code == 202
     body = response.json()
     assert body["status"] == "pending"
     assert uuid.UUID(body["request_id"])
+    assert len(fake_queue_client.sent) == 1
+    assert fake_queue_client.sent[0]["payload"] == {"request_id": body["request_id"]}
+    assert fake_queue_client.sent[0]["idempotency_key"] == body["request_id"]
 
 
-def test_create_is_idempotent(client: TestClient) -> None:
+def test_create_is_idempotent(client: TestClient, fake_queue_client: FakeQueueClient) -> None:
     first = client.post("/v1/routine-generations", json=_payload("same-key")).json()
     second_response = client.post("/v1/routine-generations", json=_payload("same-key"))
     assert second_response.status_code == 200
     assert second_response.json()["request_id"] == first["request_id"]
+    # La rama idempotente no debe publicar un segundo mensaje.
+    assert len(fake_queue_client.sent) == 1
 
 
 def test_create_rejects_empty_catalogo(client: TestClient) -> None:

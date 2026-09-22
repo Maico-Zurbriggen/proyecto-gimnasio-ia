@@ -22,12 +22,15 @@ Servicio Python de generación online y procesos batch de análisis y machine le
 
 ## Despliegue objetivo
 
-API FastAPI se despliega en Vercel. El worker (`gym_engine.worker.poller`) corre como proceso
-durable aparte y reclama trabajo pendiente con lease sobre PostgreSQL (`FOR UPDATE SKIP LOCKED`),
-sin depender de Vercel Queues por ahora — el nombre de la región (`QUEUE_REGION`) queda
-provisionado en el `.env` para cuando haga falta. El LLM permanece en el Polo detrás de un
-dominio HTTPS estable de Cloudflare Tunnel protegido con un token Bearer; Ollama no se expone sin
-autenticación. También puede usarse OpenAI como proveedor alternativo (`LLM_PROVIDER=openai`).
+API FastAPI y worker se despliegan juntos en Vercel. La API publica un mensaje en Vercel Queues
+(request_id) al crear cada solicitud; `gym_engine.worker.queue_consumer` corre como consumer
+push generado a partir de `[[tool.vercel.subscribers]]` en `pyproject.toml` y reclama esa fila
+puntual con lease sobre PostgreSQL (`FOR UPDATE SKIP LOCKED`, igual que siempre) — Vercel Queues
+es sólo el disparador, Postgres sigue siendo la única fuente de verdad de intentos/lease. El
+reintento único (`GENERATION_MAX_RETRIES`) lo decide el consumer, no el redelivery nativo de
+Vercel. El LLM permanece en el Polo detrás de un dominio HTTPS estable de Cloudflare Tunnel
+protegido con un token Bearer; Ollama no se expone sin autenticación. También puede usarse OpenAI
+como proveedor alternativo (`LLM_PROVIDER=openai`).
 
 ## Requisitos actuales
 
@@ -44,10 +47,12 @@ python -m pip install -e ".[dev]"
 cp .env.example .env
 # En PowerShell: Copy-Item .env.example .env
 
-# API (recibe la solicitud, 202 inmediato)
+# API (recibe la solicitud, 202 inmediato, publica el request_id en Vercel Queues)
 python -m uvicorn gym_engine.api.app:app --reload
 
-# Worker (procesa fuera de la petición HTTP, proceso separado)
+# Worker (procesa fuera de la petición HTTP, proceso separado). Fuera de Vercel corre en
+# poll mode contra la cola real -- requiere el proyecto vinculado (`vercel link`) para que
+# el SDK resuelva un token OIDC, o VERCEL_QUEUE_TOKEN seteado a mano.
 python -m gym_engine.worker.poller
 ```
 
@@ -75,6 +80,10 @@ Importar este repositorio como un proyecto FastAPI sin Build Command ni Output D
 `.env.example`, con valores y credenciales diferentes por ambiente. `DATABASE_URL` usa el rol
 runtime restringido de IA, nunca el rol migrador. `LLM_API_URL` apunta al endpoint publicado
 mediante Cloudflare Tunnel y `LLM_API_TOKEN` autentica cada llamada como Bearer.
+
+Habilitar Vercel Queues (beta pública) en el proyecto: `pyproject.toml` ya declara el consumer
+(`[[tool.vercel.subscribers]]`), así que Vercel lo genera como función privada air-gapped al
+desplegar, sin tocar `vercel.json`.
 
 ## Verificación
 

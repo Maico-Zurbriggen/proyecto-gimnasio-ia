@@ -1,99 +1,42 @@
-"""Worker durable (AGENTS.md): procesa solicitudes fuera de la peticion HTTP.
+"""Entrypoint local/self-hosted para el worker (AGENTS.md).
 
-Reclama filas 'PENDIENTE' (o 'PROCESANDO' con lease vencida) de
-ai_integration.ai_generation_requests via repository.claim_next_pending -- FOR UPDATE SKIP
-LOCKED + lease, atomico -- y corre el grafo
-reducido. Si el proceso se reinicia a mitad de un intento, la lease vence sola y otro tick la
-retoma; no hace falta heartbeat porque el claim ya lo resuelve (a diferencia de la version anterior
-de este poller, que pollaba una tabla que no correspondia al esquema real).
+En Vercel, gym_engine.worker.queue_consumer corre como push consumer generado a partir de
+[[tool.vercel.subscribers]] en pyproject.toml -- este script no se usa ahi. Fuera de Vercel
+(desarrollo local u otro proceso self-hosted) hace falta algo que efectivamente pida trabajo
+a Vercel Queues: este modulo corre el mismo handler (handle_routine_generation) en poll mode
+via el SDK, en vez del SQL polling directo contra Postgres que tenia la version anterior.
+
+Requiere que el proyecto este vinculado a Vercel (`vercel link`) para que el SDK resuelva un
+token OIDC al pollear, o bien VERCEL_QUEUE_TOKEN seteado a mano.
 """
 
 from __future__ import annotations
 
 import logging
-import os
-import socket
-import time
 
-import psycopg
-from psycopg.rows import DictRow
+from vercel.queue.sync import QueueClient
 
-from gym_engine.config import CONTRACT_VERSION, Settings, get_settings
-from gym_engine.llm.client import build_llm_client
-from gym_engine.llm.schemas import EjercicioRef, MinimizedContext, ParametrosRutina
-from gym_engine.orchestration.graph import build_graph
-from gym_engine.orchestration.nodes import NodeDeps
-from gym_engine.orchestration.state import GraphState
-from gym_engine.persistence import repository
-from gym_engine.persistence.db import get_connection
-from gym_engine.persistence.models import ClaimedGeneration
+from gym_engine.config import get_settings
+from gym_engine.worker.queue_consumer import handle_routine_generation
 
 logger = logging.getLogger(__name__)
 
-_WORKER_ID = f"poller:{socket.gethostname()}:{os.getpid()}"
 
-
-def _initial_state(claimed: ClaimedGeneration) -> GraphState:
-    context = claimed.minimized_context
-    return {
-        "texto_libre": context.get("texto_libre"),
-        "parametros": (
-            ParametrosRutina.model_validate(context["parametros"])
-            if context.get("parametros")
-            else None
-        ),
-        "catalogo_prefiltrado": [
-            EjercicioRef.model_validate(e) for e in context.get("catalogo_prefiltrado", [])
-        ],
-        "contexto_minimizado": MinimizedContext.model_validate(context["contexto_minimizado"]),
-        "violaciones": [],
-    }
-
-
-def process_one(conn: psycopg.Connection[DictRow], settings: Settings) -> bool:
-    claimed = repository.claim_next_pending(
-        conn,
-        worker_id=_WORKER_ID,
-        lease_seconds=settings.generation_timeout_seconds + 30,
-        contract_version=CONTRACT_VERSION,
-        model_version=settings.model_version,
-        configuration_version=settings.configuration_version,
+def run_forever() -> None:
+    settings = get_settings()
+    logger.info("Poller (poll mode) iniciado, intervalo=%ss", settings.poller_interval_seconds)
+    queue = QueueClient(region=settings.queue_region)
+    # limit=1: misma concurrencia=1 que el push consumer (AGENTS.md), para no pegarle a
+    # Ollama con mas de un intento en simultaneo.
+    future = queue.poll_and_handle(
+        handle_routine_generation,
+        interval=settings.poller_interval_seconds,
+        limit=1,
     )
-    if claimed is None:
-        return False
-
-    deps = NodeDeps(
-        client=build_llm_client(settings), conn=conn, settings=settings, claimed=claimed
-    )
-    graph = build_graph(deps)
     try:
-        graph.invoke(_initial_state(claimed))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        repository.fail(
-            conn,
-            claimed,
-            attempt_state="FALLIDO",
-            error_code="unexpected_error",
-            max_attempts=deps.max_attempts,
-        )
-        conn.commit()
-        logger.exception("Fallo procesando request_id=%s", claimed.request_id)
-    return True
-
-
-def run_forever(settings: Settings | None = None) -> None:
-    settings = settings or get_settings()
-    logger.info("Poller iniciado, intervalo=%ss", settings.poller_interval_seconds)
-    while True:
-        conn = get_connection(settings)
-        try:
-            processed = process_one(conn, settings)
-        finally:
-            conn.close()
-        if not processed:
-            time.sleep(settings.poller_interval_seconds)
+        future.result()
+    except KeyboardInterrupt:
+        future.cancel()
 
 
 if __name__ == "__main__":

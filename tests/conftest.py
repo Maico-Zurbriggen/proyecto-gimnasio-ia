@@ -91,3 +91,27 @@ def fake_repository() -> FakeRepository:
 @pytest.fixture
 def fake_connection() -> FakeConnection:
     return FakeConnection()
+
+
+class FakeQueueClient:
+    """Reemplaza el QueueClient de vercel.queue en tests de la API: los tests no deben
+    pegarle de verdad al servicio de Vercel Queues."""
+
+    def __init__(self) -> None:
+        self.sent: list[dict[str, Any]] = []
+
+    def send(
+        self,
+        topic: object,
+        payload: dict[str, Any],
+        *,
+        idempotency_key: str | None = None,
+        **kwargs: Any,
+    ) -> str:
+        self.sent.append({"topic": topic, "payload": payload, "idempotency_key": idempotency_key})
+        return f"fake-message-{len(self.sent)}"
+
+
+@pytest.fixture
+def fake_queue_client() -> FakeQueueClient:
+    return FakeQueueClient()

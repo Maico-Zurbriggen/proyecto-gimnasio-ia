@@ -5,6 +5,7 @@ from uuid import UUID
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Response
 from psycopg.rows import DictRow
+from vercel.queue.sync import QueueClient
 
 from gym_engine.api.auth import RequireApiKey
 from gym_engine.api.schemas import (
@@ -15,6 +16,7 @@ from gym_engine.api.schemas import (
 from gym_engine.config import Settings, get_settings
 from gym_engine.persistence import repository
 from gym_engine.persistence.db import get_connection
+from gym_engine.worker.queue_consumer import ROUTINE_GENERATIONS_TOPIC
 
 router = APIRouter(
     prefix="/v1/routine-generations",
@@ -59,6 +61,13 @@ ConnectionDep = Annotated[psycopg.Connection[DictRow], Depends(get_connection_de
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 
+def get_queue_client(settings: SettingsDep) -> QueueClient:
+    return QueueClient(region=settings.queue_region)
+
+
+QueueClientDep = Annotated[QueueClient, Depends(get_queue_client)]
+
+
 def _build_minimized_context(payload: RoutineGenerationCreate) -> dict[str, Any]:
     """Empaqueta lo que el grafo necesita para reanudar. Las tablas de ai_integration no
     tienen columnas propias para esto -- minimized_context/preferences son jsonb libre."""
@@ -82,6 +91,7 @@ def create_routine_generation(
     response: Response,
     conn: ConnectionDep,
     settings: SettingsDep,
+    queue: QueueClientDep,
 ) -> RoutineGenerationAccepted:
     existing = repository.get_by_idempotency_key(conn, payload.idempotency_key)
     if existing is not None:
@@ -96,6 +106,15 @@ def create_routine_generation(
         minimized_context=_build_minimized_context(payload),
         preferences={},
         retention_days=settings.failed_result_retention_days,
+    )
+    # Commit explicito antes de publicar: el consumer puede disparar casi instantaneo y
+    # necesita ver la fila ya commiteada (el commit normal de get_connection_dep recien
+    # ocurre al final del generator, despues de que esta funcion retorne).
+    conn.commit()
+    queue.send(
+        ROUTINE_GENERATIONS_TOPIC,
+        {"request_id": str(request["id"])},
+        idempotency_key=str(request["id"]),
     )
     return RoutineGenerationAccepted(
         request_id=request["id"], status=_STATE_TO_STATUS[request["state"]]

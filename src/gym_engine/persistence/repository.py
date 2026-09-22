@@ -124,35 +124,19 @@ def get_status(conn: psycopg.Connection[DictRow], request_id: uuid.UUID) -> Requ
     )
 
 
-def claim_next_pending(
+def _finish_claim(
     conn: psycopg.Connection[DictRow],
+    request: DictRow,
     *,
     worker_id: str,
     lease_seconds: int,
     contract_version: str,
     model_version: str,
     configuration_version: str,
-) -> ClaimedGeneration | None:
-    """Reclamo atómico: FOR UPDATE SKIP LOCKED + lease, crea la fila de intento."""
-    cur = conn.execute(
-        """
-        select id, minimized_context, preferences, retention_until
-        from ai_integration.ai_generation_requests
-        where available_at <= now()
-          and retention_until > now()
-          and (
-            state = 'PENDIENTE'
-            or (state = 'PROCESANDO' and lease_until < now())
-          )
-        order by available_at
-        limit 1
-        for update skip locked
-        """
-    )
-    request = cur.fetchone()
-    if request is None:
-        return None
-
+) -> ClaimedGeneration:
+    """Completa un reclamo ya seleccionado con FOR UPDATE SKIP LOCKED: crea la fila de
+    intento y pasa la request a PROCESANDO con lease. Compartido por claim_next_pending
+    (cola general) y claim_by_id (mensaje puntual de Vercel Queues)."""
     request_id = request["id"]
     attempt_cur = conn.execute(
         """
@@ -205,6 +189,90 @@ def claim_next_pending(
         minimized_context=request["minimized_context"],
         preferences=request["preferences"],
         retention_until=request["retention_until"],
+    )
+
+
+def claim_next_pending(
+    conn: psycopg.Connection[DictRow],
+    *,
+    worker_id: str,
+    lease_seconds: int,
+    contract_version: str,
+    model_version: str,
+    configuration_version: str,
+) -> ClaimedGeneration | None:
+    """Reclamo atómico: FOR UPDATE SKIP LOCKED + lease, crea la fila de intento."""
+    cur = conn.execute(
+        """
+        select id, minimized_context, preferences, retention_until
+        from ai_integration.ai_generation_requests
+        where available_at <= now()
+          and retention_until > now()
+          and (
+            state = 'PENDIENTE'
+            or (state = 'PROCESANDO' and lease_until < now())
+          )
+        order by available_at
+        limit 1
+        for update skip locked
+        """
+    )
+    request = cur.fetchone()
+    if request is None:
+        return None
+
+    return _finish_claim(
+        conn,
+        request,
+        worker_id=worker_id,
+        lease_seconds=lease_seconds,
+        contract_version=contract_version,
+        model_version=model_version,
+        configuration_version=configuration_version,
+    )
+
+
+def claim_by_id(
+    conn: psycopg.Connection[DictRow],
+    request_id: uuid.UUID,
+    *,
+    worker_id: str,
+    lease_seconds: int,
+    contract_version: str,
+    model_version: str,
+    configuration_version: str,
+) -> ClaimedGeneration | None:
+    """Reclamo atómico de una request puntual, identificada por un mensaje de Vercel Queues
+    (mismo FOR UPDATE SKIP LOCKED + lease que claim_next_pending). Devuelve None si la fila
+    no está disponible: ya fue procesada, está en curso con lease vigente, o el delivery es
+    una redelivery duplicada de un mensaje ya reclamado -- en cualquier caso, ack sin trabajo."""
+    cur = conn.execute(
+        """
+        select id, minimized_context, preferences, retention_until
+        from ai_integration.ai_generation_requests
+        where id = %s
+          and available_at <= now()
+          and retention_until > now()
+          and (
+            state = 'PENDIENTE'
+            or (state = 'PROCESANDO' and lease_until < now())
+          )
+        for update skip locked
+        """,
+        (request_id,),
+    )
+    request = cur.fetchone()
+    if request is None:
+        return None
+
+    return _finish_claim(
+        conn,
+        request,
+        worker_id=worker_id,
+        lease_seconds=lease_seconds,
+        contract_version=contract_version,
+        model_version=model_version,
+        configuration_version=configuration_version,
     )
 
 

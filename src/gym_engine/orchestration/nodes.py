@@ -5,8 +5,9 @@ solicitud, porque el servicio de IA no tiene acceso a tablas de dominio (AGENTS.
 
 Sin retry interno: cada invocacion del grafo corresponde a UN claim = UNA fila de
 ai_generation_attempts (esquema real, ver persistence/repository.py). Si algo falla,
-persistir_fallo decide si la solicitud vuelve a PENDIENTE (el poller la reclama de nuevo
-en su proximo tick, abriendo un intento nuevo) o se agota (NO_DISPONIBLE) -- eso reemplaza
+persistir_fallo decide si la solicitud vuelve a PENDIENTE (el consumer de Vercel Queues en
+worker/queue_consumer.py levanta RetryAfter para que el mismo mensaje se redeliver y la
+reclame de nuevo, abriendo un intento nuevo) o se agota (NO_DISPONIBLE) -- eso reemplaza
 al loop-back generar_rutina<->validar_estructura que tenia la version anterior.
 """
 
@@ -204,14 +205,14 @@ def build_via_fallida(deps: NodeDeps) -> NodeFn:
         violaciones = state.get("violaciones") or ["fallo no especificado"]
         attempt_state = state.get("attempt_state") or "SALIDA_INVALIDA"
         error_code = "; ".join(violaciones)
-        repository.fail(
+        exhausted = repository.fail(
             deps.conn,
             deps.claimed,
             attempt_state=attempt_state,
             error_code=error_code,
             max_attempts=deps.max_attempts,
         )
-        return {"ruta": "FALLIDA"}
+        return {"ruta": "FALLIDA", "agotado": exhausted}
 
     return via_fallida
 

@@ -21,9 +21,9 @@ class Settings(BaseSettings):
 
     ai_service_api_key: str | None = None
 
-    # Región de Vercel Queues (mismo nombre ya provisionado en develop); no consumida aún
-    # por este servicio -- el worker actual es un poller directo sobre PostgreSQL -- pero se
-    # preserva para no romper el deployment/env compartido con backend.
+    # Región de Vercel Queues (mismo nombre ya provisionado en develop). La usa el poller
+    # local en modo poll (worker/poller.py); el consumer push en Vercel (queue_consumer.py)
+    # no la necesita porque VERCEL_REGION ya viene provisto por la plataforma.
     queue_region: str = "gru1"
 
     llm_provider: str = "ollama"  # "ollama" | "openai"

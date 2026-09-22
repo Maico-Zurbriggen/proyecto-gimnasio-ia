@@ -18,6 +18,7 @@ dependencies = [
   # (CompiledStateGraph pasa a requerir type-arg) y rompe mypy en orchestration/graph.py -- no
   # migrado todavía, así que no dejar que un resolve sin lockfile salte de mayor.
   "langgraph>=0.2,<0.3",
+  "vercel-queue>=0.9,<0.10",
 ]
 
 [project.optional-dependencies]
@@ -55,3 +56,6 @@ mypy_path = "src"
 
 [tool.vercel]
 entrypoint = "src.gym_engine.api.app:app"
+
+[[tool.vercel.subscribers]]
+entrypoint = "gym_engine.worker.queue_consumer"

@@ -6,9 +6,9 @@ from fastapi.testclient import TestClient
 
 import gym_engine.api.routes as routes_module
 from gym_engine.api.app import create_app
-from gym_engine.api.routes import get_connection_dep
+from gym_engine.api.routes import get_connection_dep, get_queue_client
 from gym_engine.config import Settings, get_settings
-from tests.conftest import FakeConnection, FakeRepository
+from tests.conftest import FakeConnection, FakeQueueClient, FakeRepository
 
 
 def _settings(**overrides: object) -> Settings:
@@ -25,6 +25,7 @@ def _settings(**overrides: object) -> Settings:
 def make_client(
     fake_repository: FakeRepository,
     fake_connection: FakeConnection,
+    fake_queue_client: FakeQueueClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> Callable[[Settings], TestClient]:
     monkeypatch.setattr(routes_module, "repository", fake_repository)
@@ -33,6 +34,7 @@ def make_client(
         app = create_app()
         app.dependency_overrides[get_connection_dep] = lambda: fake_connection
         app.dependency_overrides[get_settings] = lambda: settings
+        app.dependency_overrides[get_queue_client] = lambda: fake_queue_client
         return TestClient(app)
 
     return _make
