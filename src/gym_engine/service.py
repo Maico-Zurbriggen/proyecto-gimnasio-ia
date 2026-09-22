@@ -71,4 +71,7 @@ async def process_generation(request_id: UUID, settings: Settings) -> None:
             max_attempts=settings.max_attempts,
         )
         if not exhausted:
-            raise GenerationProcessingError("LLM request failed") from error
+            detail = ""
+            if isinstance(error, httpx.HTTPStatusError):
+                detail = f": {error.response.status_code} {error.response.text[:300]}"
+            raise GenerationProcessingError(f"LLM request failed{detail}") from error
