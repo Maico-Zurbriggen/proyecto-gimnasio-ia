@@ -32,9 +32,11 @@ class OllamaClient:
         self._api_key = settings.llm_api_token
 
     def _headers(self) -> dict[str, str]:
+        # Salta la página intersticial de advertencia de ngrok.
+        headers = {"ngrok-skip-browser-warning": "true"}
         if self._api_key:
-            return {"Authorization": f"Bearer {self._api_key}"}
-        return {}
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        return headers
 
     def generate_structured(self, prompt: str, schema: type[ModelT]) -> ModelT:
         payload = {
@@ -54,7 +56,20 @@ class OllamaClient:
         except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError) as exc:
             raise LlmUnavailable(str(exc)) from exc
 
-        raw = response.json().get("response", "")
+        try:
+            body = response.json()
+        except ValueError as exc:
+            # Típico de ngrok/proxy devolviendo HTML u otro cuerpo no JSON.
+            raise LlmInvalidOutput(
+                f"respuesta de Ollama no es JSON: {response.text[:200]!r}"
+            ) from exc
+        raw = body.get("response", "")
+        if not raw:
+            raise LlmInvalidOutput(
+                "Ollama devolvió 'response' vacío "
+                f"(model={body.get('model')!r}, done_reason={body.get('done_reason')!r}, "
+                f"claves={sorted(body)}, error={body.get('error')!r})"
+            )
         try:
             return schema.model_validate_json(raw)
         except ValidationError as exc:
