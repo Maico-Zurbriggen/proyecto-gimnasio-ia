@@ -80,9 +80,11 @@ class OllamaClient:
         self._api_key = settings.llm_api_token
 
     def _headers(self) -> dict[str, str]:
+        # Evita la página intersticial de advertencia de ngrok en las llamadas programáticas.
+        headers = {"ngrok-skip-browser-warning": "true"}
         if self._api_key:
-            return {"Authorization": f"Bearer {self._api_key}"}
-        return {}
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        return headers
 
     def generate_structured(self, prompt: str, schema: type[ModelT]) -> ModelT:
         payload = {
@@ -101,10 +103,14 @@ class OllamaClient:
             ) as response:
                 response.raise_for_status()
                 chunks: list[str] = []
+                last_chunk: dict[str, Any] = {}
                 for line in response.iter_lines():
                     if not line.strip():
                         continue
                     chunk = json.loads(line)
+                    if "error" in chunk:
+                        raise LlmUnavailable(f"Ollama devolvió error: {chunk['error']}")
+                    last_chunk = chunk
                     value = chunk.get("response", "")
                     if isinstance(value, str):
                         chunks.append(value)
@@ -114,6 +120,12 @@ class OllamaClient:
             raise LlmInvalidOutput(str(exc)) from exc
 
         raw = "".join(chunks)
+        if not raw.strip():
+            raise LlmInvalidOutput(
+                "Ollama devolvió respuesta vacía "
+                f"(done_reason={last_chunk.get('done_reason')!r}, "
+                f"tiene_thinking={bool(last_chunk.get('thinking'))})"
+            )
         try:
             return schema.model_validate_json(raw)
         except ValidationError as exc:
