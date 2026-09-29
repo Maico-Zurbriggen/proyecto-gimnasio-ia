@@ -81,17 +81,23 @@ class OllamaClient:
 
     def _headers(self) -> dict[str, str]:
         # Evita la página intersticial de advertencia de ngrok en las llamadas programáticas.
-        headers = {"ngrok-skip-browser-warning": "true"}
+        headers = {"ngrok-skip-browser-warning": "1"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
         return headers
 
     def generate_structured(self, prompt: str, schema: type[ModelT]) -> ModelT:
+        # Sin `format`: el schema va en el prompt y pydantic sigue siendo el contrato.
+        # `think: false` evita que modelos de razonamiento gasten la salida en `thinking`.
+        schema_json = json.dumps(ollama_format_schema(schema), ensure_ascii=False)
         payload = {
             "model": self._model,
-            "prompt": prompt,
-            "format": ollama_format_schema(schema),
+            "prompt": (
+                f"{prompt}\n\nResponde unicamente con un objeto JSON valido, sin texto adicional "
+                f"ni bloques de codigo, que cumpla este JSON Schema: {schema_json}"
+            ),
             "stream": True,
+            "think": False,
         }
         try:
             with httpx.stream(
@@ -126,6 +132,10 @@ class OllamaClient:
                 f"(done_reason={last_chunk.get('done_reason')!r}, "
                 f"tiene_thinking={bool(last_chunk.get('thinking'))})"
             )
+        # Sin `format` el modelo puede envolver el JSON en texto o ```; se recorta al objeto.
+        start, end = raw.find("{"), raw.rfind("}")
+        if start != -1 and end > start:
+            raw = raw[start : end + 1]
         try:
             return schema.model_validate_json(raw)
         except ValidationError as exc:
