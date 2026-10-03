@@ -8,8 +8,8 @@ Servicio Python de generación online y procesos batch de análisis y machine le
 
 - exponer un OpenAPI versionado para backend;
 - aceptar solicitudes asíncronas e idempotentes;
-- orquestar el LLM alojado en el Polo;
-- persistir estados y resultados en estructuras autorizadas de Neon;
+- orquestar el LLM configurado para el ambiente;
+- persistir estados y resultados en estructuras autorizadas de PostgreSQL;
 - registrar modelo, configuración, contrato e instante;
 - no crear ni aprobar rutinas.
 
@@ -22,72 +22,43 @@ Servicio Python de generación online y procesos batch de análisis y machine le
 
 ## Despliegue objetivo
 
-API FastAPI y worker se despliegan juntos en Vercel. La API publica un mensaje en Vercel Queues
-(request_id) al crear cada solicitud; `gym_engine.worker.queue_consumer` corre como consumer
-push generado a partir de `[[tool.vercel.subscribers]]` en `pyproject.toml` y reclama esa fila
-puntual con lease sobre PostgreSQL (`FOR UPDATE SKIP LOCKED`, igual que siempre) — Vercel Queues
-es sólo el disparador, Postgres sigue siendo la única fuente de verdad de intentos/lease. El
-reintento único (`GENERATION_MAX_RETRIES`) lo decide el consumer, no el redelivery nativo de
-Vercel. El LLM permanece en el Polo detrás de un dominio HTTPS estable de Cloudflare Tunnel
-protegido con un token Bearer; Ollama no se expone sin autenticación. También puede usarse OpenAI
-como proveedor alternativo (`LLM_PROVIDER=openai`).
+API FastAPI y consumidor durable se despliegan en Vercel. Vercel Queues desacopla la aceptación `202` del trabajo de generación. El LLM permanece en el Polo detrás de su API autenticada por ngrok, bajo el prefijo `/polo`. `LLM_API_TOKEN` contiene `POLO_API_TOKEN` y cada llamada envía `ngrok-skip-browser-warning: 1`; Ollama no se expone sin autenticación.
 
 ## Requisitos actuales
 
 - Python 3.13;
-- acceso autorizado a Neon Test con el rol restringido del servicio de IA;
-- acceso al endpoint autenticado del LLM del Polo (o credenciales de OpenAI) para integración real.
+- PostgreSQL local con el rol restringido de IA, o la base del deployment;
+- acceso al endpoint autenticado del LLM del Polo para integración real.
 
 ## Inicio local
 
 ```bash
 python -m venv .venv
 # Activar el entorno virtual
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[analytics,dev]"
 cp .env.example .env
-# En PowerShell: Copy-Item .env.example .env
-
-# API (recibe la solicitud, 202 inmediato, publica el request_id en Vercel Queues)
-python -m uvicorn gym_engine.api.app:app --reload
-
-# Worker (procesa fuera de la petición HTTP, proceso separado). Fuera de Vercel corre en
-# poll mode contra la cola real -- requiere el proyecto vinculado (`vercel link`) para que
-# el SDK resuelva un token OIDC, o VERCEL_QUEUE_TOKEN seteado a mano.
-python -m gym_engine.worker.poller
+python dev_server.py
 ```
 
-Backend es dueño de las migraciones; este repositorio no ejecuta cambios de esquema — las tablas
-`ai_generation_*` deben existir de antemano en `DATABASE_URL`.
+En PowerShell, usar `Copy-Item .env.example .env`. En Windows, el lanzador local fuerza el event loop Selector porque Uvicorn usa Proactor por defecto y Psycopg async requiere Selector. Backend es dueño de las migraciones; este repositorio no ejecuta cambios de esquema.
+
+Para correr la generación local, establecer `APP_ENV=local` y `GENERATION_QUEUE_MODE=local` en `.env.local`. `DATABASE_URL` debe ser `postgresql://gym_ai_local@127.0.0.1:55432/gym_local`, sin el parámetro `schema` de Prisma; Backend crea la base y el rol restringido. `APP_ENV=local` rechaza bases remotas. El worker del servicio consulta las solicitudes persistidas cada dos segundos y se despierta al recibir un dispatch. Recupera pendientes sin intento y leases vencidos, procesa de a una y conserva el máximo de dos intentos tras reinicios. El proceso debe permanecer activo para trabajar; este modo sólo se permite en desarrollo.
+
+El LLM sigue alojado en el Polo. El conector limita el contexto a 8192 tokens y `/ready` comprueba que el modelo configurado esté instalado. El modo local cambia PostgreSQL y el procesamiento de solicitudes; conserva la inferencia real por la API autenticada del Polo y las validaciones del backend.
+
+La respuesta del Polo se recibe por streaming JSONL y sólo se acepta después de `done: true`. El intento completo conserva el límite de 120 segundos, aunque sigan llegando fragmentos. Antes de registrar `COMPLETADA`, IA comprueba catálogo, disponibilidad y las restricciones de prescripción entregadas por backend; una salida inválida usa el único reintento previsto. Las conexiones PostgreSQL vencen a los cinco segundos para permitir que el worker se recupere cuando la base vuelve a estar disponible.
 
 Endpoints:
 
 - `GET /health`: salud del proceso, público y sin consultar dependencias;
-- `GET /ready`: verifica PostgreSQL; requiere autenticación (`X-API-Key` o
-  `Authorization: Bearer <AI_SERVICE_API_KEY>`);
-- `POST /v1/routine-generations`: crea (o recupera, si el `idempotency_key` ya existe) una
-  solicitud de generación de rutina y responde `202`/`200`;
-- `GET /v1/routine-generations/{request_id}`: consulta el estado y, si está completa, la
-  estructura candidata.
-
-El contrato `routine-generation@1.1` persiste también `tipo_rutina` y
-`frecuencia_semanal`; cada `carga_sugerida` es un número de kilogramos entre 0 y 1000. Backend
-conserva la autoridad para revalidar la salida y crear la rutina `PROPUESTA`.
-
-Ambos endpoints de negocio requieren `X-API-Key` o `Authorization: Bearer` con el mismo secreto
-(`AI_SERVICE_API_KEY`) — se aceptan los dos esquemas mientras conviven clientes que usan uno u
-otro.
+- `GET /ready`: verifica PostgreSQL y el LLM; requiere `Authorization: Bearer <AI_SERVICE_API_KEY>`;
+- `POST /v1/generation-requests/{requestId}/dispatch`: verifica una solicitud creada por backend y responde `202`; usa Vercel Queues en despliegues y el worker local cuando `GENERATION_QUEUE_MODE=local`.
 
 ## Vercel
 
-Importar este repositorio como un proyecto FastAPI sin Build Command ni Output Directory. Usar
-`test` como Preview estable y `main` como Production. Configurar las mismas variables de
-`.env.example`, con valores y credenciales diferentes por ambiente. `DATABASE_URL` usa el rol
-runtime restringido de IA, nunca el rol migrador. `LLM_API_URL` apunta al endpoint publicado
-mediante Cloudflare Tunnel y `LLM_API_TOKEN` autentica cada llamada como Bearer.
+Importar este repositorio como un proyecto FastAPI sin Build Command ni Output Directory. Usar `test` como Preview estable y `main` como Production. Configurar las mismas variables de `.env.example`, con valores y credenciales diferentes por ambiente. `DATABASE_URL` usa el rol runtime restringido de IA, nunca el rol migrador.
 
-Habilitar Vercel Queues (beta pública) en el proyecto: `pyproject.toml` ya declara el consumer
-(`[[tool.vercel.subscribers]]`), así que Vercel lo genera como función privada air-gapped al
-desplegar, sin tocar `vercel.json`.
+La cola y el consumidor se generan desde `vercel-queue`; la región queda en `gru1` y la concurrencia se limita a uno para no saturar Ollama. `LLM_API_URL` apunta a `https://yen-entrench-grader.ngrok-free.dev/polo`; el conector consulta `/api/tags` y `/api/chat` con el Bearer de `POLO_API_TOKEN` y el encabezado `ngrok-skip-browser-warning: 1`. La configuración `generative/generar-rutina@10` usa un JSON Schema compatible como `format` y `think: false`, índices de catálogo y grupos de series con campos breves para reducir la inferencia. Su formato privado, compatibilidad con el runtime y expansión al contrato público están definidos en [la arquitectura generativa](https://github.com/Maico-Zurbriggen/proyecto-gimnasio-documentacion/blob/develop/architecture/generative-ai.md). El prompt recibe los rangos y cobertura que valida backend mediante `prescription_constraints`, las cantidades explícitas por día en `muscle_counts_per_day` y los músculos primarios del catálogo. La validación comprueba IDs distintos por músculo en cada día y no cuenta participación secundaria; un incumplimiento usa el reintento y nunca se completa como válido. Las llamadas locales a Vercel Queues requieren vincular el proyecto con `vercel link` y cargar sus variables con `vercel env pull`.
 
 ## Verificación
 
@@ -97,7 +68,4 @@ python -m mypy src
 python -m pytest
 ```
 
-La interfaz con el backend está descrita en `architecture/data-interface.md` del
-[repositorio documental](https://github.com/Maico-Zurbriggen/proyecto-gimnasio-documentacion). Allí
-también viven el corpus funcional, la arquitectura y las reglas de dominio. Para trabajo asistido
-por IA, comenzar por su `AGENTS.md` y `manifest.json`.
+La interfaz con el backend está descrita en `architecture/data-interface.md` del [repositorio documental](https://github.com/Maico-Zurbriggen/proyecto-gimnasio-documentacion). Allí también viven el corpus funcional, la arquitectura y las reglas de dominio. Para trabajo asistido por IA, comenzar por su `AGENTS.md` y `manifest.json`.

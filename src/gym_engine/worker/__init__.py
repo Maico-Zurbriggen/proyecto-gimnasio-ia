@@ -1,1 +1,1 @@
-"""Worker durable: reclama y procesa solicitudes fuera de la petición HTTP."""
+"""Consumidores durables de Vercel Queues."""
