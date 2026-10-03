@@ -26,11 +26,15 @@ class GenerationRepository:
         self._database_url = database_url
 
     async def ping(self) -> None:
-        async with await psycopg.AsyncConnection.connect(self._database_url) as connection:
+        async with await psycopg.AsyncConnection.connect(
+            self._database_url, connect_timeout=5
+        ) as connection:
             await connection.execute("SELECT 1")
 
     async def request_exists(self, request_id: UUID) -> bool:
-        async with await psycopg.AsyncConnection.connect(self._database_url) as connection:
+        async with await psycopg.AsyncConnection.connect(
+            self._database_url, connect_timeout=5
+        ) as connection:
             cursor = await connection.execute(
                 """
                 SELECT 1
@@ -43,6 +47,31 @@ class GenerationRepository:
             )
             return await cursor.fetchone() is not None
 
+    async def retryable_request_ids(self, limit: int = 20) -> list[UUID]:
+        async with await psycopg.AsyncConnection.connect(
+            self._database_url, connect_timeout=5
+        ) as connection:
+            cursor = await connection.execute(
+                """
+                SELECT request.id
+                FROM ai_integration.ai_generation_requests AS request
+                WHERE request.available_at <= now()
+                  AND request.retention_until > now()
+                  AND (
+                    request.state = 'PENDIENTE'
+                    OR (
+                      request.state = 'PROCESANDO'
+                      AND request.lease_until < now()
+                    )
+                  )
+                ORDER BY request.available_at, request.created_at
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = await cursor.fetchall()
+            return [UUID(str(row[0])) for row in rows]
+
     async def claim(
         self,
         request_id: UUID,
@@ -51,9 +80,10 @@ class GenerationRepository:
         contract_version: str,
         model_version: str,
         configuration_version: str,
+        max_attempts: int = 2,
     ) -> ClaimedGeneration | None:
         async with await psycopg.AsyncConnection.connect(
-            self._database_url, row_factory=dict_row
+            self._database_url, row_factory=dict_row, connect_timeout=5
         ) as connection, connection.transaction():
             cursor = await connection.execute(
                 """
@@ -74,6 +104,16 @@ class GenerationRepository:
             if request is None:
                 return None
 
+            await connection.execute(
+                """
+                    UPDATE ai_integration.ai_generation_attempts
+                    SET state = 'AGOTADO_POR_TIEMPO', finished_at = now(),
+                        error_code = 'worker_lease_expired'
+                    WHERE request_id = %s AND state = 'PROCESANDO'
+                    """,
+                (request_id,),
+            )
+
             attempt_cursor = await connection.execute(
                 """
                     SELECT COALESCE(MAX(attempt_number), 0) + 1 AS attempt_number
@@ -86,6 +126,17 @@ class GenerationRepository:
             if attempt_row is None:
                 raise RuntimeError("Could not allocate a generation attempt")
             attempt_number = int(attempt_row["attempt_number"])
+            if attempt_number > max_attempts:
+                await connection.execute(
+                    """
+                        UPDATE ai_integration.ai_generation_requests
+                        SET state = 'NO_DISPONIBLE', finished_at = now(),
+                            lease_owner = NULL, lease_until = NULL
+                        WHERE id = %s
+                        """,
+                    (request_id,),
+                )
+                return None
             input_hash = _hash_input(
                 request["minimized_context"], request["preferences"]
             )
@@ -141,7 +192,7 @@ class GenerationRepository:
         configuration_version: str,
     ) -> None:
         async with await psycopg.AsyncConnection.connect(
-            self._database_url
+            self._database_url, connect_timeout=5
         ) as connection, connection.transaction():
                 await connection.execute(
                     """
@@ -187,7 +238,7 @@ class GenerationRepository:
         exhausted = claimed.attempt_number >= max_attempts
         request_state = "NO_DISPONIBLE" if exhausted else "PENDIENTE"
         async with await psycopg.AsyncConnection.connect(
-            self._database_url
+            self._database_url, connect_timeout=5
         ) as connection, connection.transaction():
                 await connection.execute(
                     """

@@ -5,6 +5,21 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+MovementPattern = Literal[
+    "EMPUJE_HORIZONTAL",
+    "EMPUJE_VERTICAL",
+    "TRACCION_HORIZONTAL",
+    "TRACCION_VERTICAL",
+    "DOMINANTE_RODILLA",
+    "DOMINANTE_CADERA",
+    "CORE",
+    "AISLAMIENTO_SUPERIOR",
+    "AISLAMIENTO_INFERIOR",
+]
+TrainingPurpose = Literal[
+    "FUERZA", "HIPERTROFIA", "RESISTENCIA_MUSCULAR", "ACONDICIONAMIENTO_GENERAL"
+]
+
 
 class GenerationMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -37,17 +52,7 @@ class RoutineDayOutput(BaseModel):
 
     position: int = Field(ge=1)
     name: str = Field(min_length=1, max_length=120)
-    dominant_pattern: Literal[
-        "EMPUJE_HORIZONTAL",
-        "EMPUJE_VERTICAL",
-        "TRACCION_HORIZONTAL",
-        "TRACCION_VERTICAL",
-        "DOMINANTE_RODILLA",
-        "DOMINANTE_CADERA",
-        "CORE",
-        "AISLAMIENTO_SUPERIOR",
-        "AISLAMIENTO_INFERIOR",
-    ]
+    dominant_pattern: MovementPattern
     exercises: list[RoutineExerciseOutput] = Field(min_length=1)
 
 
@@ -55,12 +60,7 @@ class RoutineGenerationOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["1.0"]
-    routine_type: Literal[
-        "FUERZA",
-        "HIPERTROFIA",
-        "RESISTENCIA_MUSCULAR",
-        "ACONDICIONAMIENTO_GENERAL",
-    ]
+    routine_type: TrainingPurpose
     target_weekly_frequency: int = Field(ge=1, le=7)
     days: list[RoutineDayOutput] = Field(min_length=1, max_length=7)
     uncovered_patterns: list[str] = Field(default_factory=list)
