@@ -1,164 +1,329 @@
-import uuid
-from collections.abc import Iterator
+import asyncio
+from dataclasses import replace
+from threading import Event
+from uuid import UUID
 
-import pytest
 from fastapi.testclient import TestClient
+from pytest import MonkeyPatch, raises
+from vercel.queue import (
+    DuplicateIdempotencyKeyError,
+    QueueClient,
+    TokenResolutionError,
+)
 
-import gym_engine.api.routes as routes_module
-from gym_engine.api.app import create_app
-from gym_engine.api.auth import verify_api_key
-from gym_engine.api.routes import get_connection_dep, get_queue_client
-from gym_engine.config import Settings, get_settings
-from tests.conftest import FakeConnection, FakeQueueClient, FakeRepository
+from gym_engine.api import app as api_module
+from gym_engine.config import ConfigurationError, Settings
+from gym_engine.persistence import GenerationRepository
+from gym_engine.service import GenerationProcessingError
 
 
-def _test_settings() -> Settings:
+def settings() -> Settings:
     return Settings(
-        _env_file=None,
+        app_env="test",
         database_url="postgresql://example.invalid/gym-test",
-        ai_service_api_key="service-secret",
+        api_key="service-secret",
+        generation_queue_mode="vercel",
+        queue_region="gru1",
+        llm_api_url="https://llm.example.invalid",
+        llm_model="qwen3.5:9b-instruct",
+        llm_api_token="llm-secret",
+        configuration_version="generative/generar-rutina@1",
+        timeout_seconds=120,
+        max_attempts=2,
     )
-
-
-@pytest.fixture
-def client(
-    fake_repository: FakeRepository,
-    fake_connection: FakeConnection,
-    fake_queue_client: FakeQueueClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> Iterator[TestClient]:
-    monkeypatch.setattr(routes_module, "repository", fake_repository)
-    app = create_app()
-    app.dependency_overrides[get_connection_dep] = lambda: fake_connection
-    app.dependency_overrides[verify_api_key] = lambda: None
-    app.dependency_overrides[get_settings] = _test_settings
-    app.dependency_overrides[get_queue_client] = lambda: fake_queue_client
-    with TestClient(app) as test_client:
-        yield test_client
-
-
-def _payload(idempotency_key: str = "idem-1") -> dict:
-    return {
-        "idempotency_key": idempotency_key,
-        "gym_id": str(uuid.uuid4()),
-        "student_id": str(uuid.uuid4()),
-        "requested_by_user_id": str(uuid.uuid4()),
-        "texto_libre": "quiero una rutina de fuerza",
-        "catalogo_prefiltrado": [
-            {"id": str(uuid.uuid4()), "nombre": "Sentadilla", "patron_movimiento": "squat"}
-        ],
-        "contexto_minimizado": {"nivel_experiencia": "intermedio", "dias_semanales_disponibles": 4},
-    }
-
-
-def test_create_returns_202_and_pending(
-    client: TestClient, fake_queue_client: FakeQueueClient
-) -> None:
-    response = client.post("/v1/routine-generations", json=_payload())
-    assert response.status_code == 202
-    body = response.json()
-    assert body["status"] == "pending"
-    assert uuid.UUID(body["request_id"])
-    assert len(fake_queue_client.sent) == 1
-    assert fake_queue_client.sent[0]["payload"] == {"request_id": body["request_id"]}
-    assert fake_queue_client.sent[0]["idempotency_key"] == body["request_id"]
-
-
-def test_create_is_idempotent(client: TestClient, fake_queue_client: FakeQueueClient) -> None:
-    first = client.post("/v1/routine-generations", json=_payload("same-key")).json()
-    second_response = client.post("/v1/routine-generations", json=_payload("same-key"))
-    assert second_response.status_code == 200
-    assert second_response.json()["request_id"] == first["request_id"]
-    # La rama idempotente no debe publicar un segundo mensaje.
-    assert len(fake_queue_client.sent) == 1
-
-
-def test_create_rejects_empty_catalogo(client: TestClient) -> None:
-    payload = _payload()
-    payload["catalogo_prefiltrado"] = []
-    response = client.post("/v1/routine-generations", json=payload)
-    assert response.status_code == 422
-
-
-def test_get_unknown_request_returns_404(client: TestClient) -> None:
-    response = client.get(f"/v1/routine-generations/{uuid.uuid4()}")
-    assert response.status_code == 404
-
-
-def test_get_pending_request(client: TestClient) -> None:
-    created = client.post("/v1/routine-generations", json=_payload("idem-status")).json()
-    response = client.get(f"/v1/routine-generations/{created['request_id']}")
-    assert response.status_code == 200
-    assert response.json()["status"] == "pending"
-
-
-def test_get_completed_request_returns_structured_output(
-    client: TestClient, fake_repository: FakeRepository
-) -> None:
-    created = client.post("/v1/routine-generations", json=_payload("idem-completed")).json()
-    request_id = uuid.UUID(created["request_id"])
-    fake_repository.set_state(
-        request_id, state="COMPLETADA", structured_output={"dias": []}
-    )
-
-    response = client.get(f"/v1/routine-generations/{request_id}")
-    body = response.json()
-    assert body["status"] == "completed"
-    assert body["estructura_candidata"] == {"dias": []}
-
-
-def test_get_failed_request_returns_error(
-    client: TestClient, fake_repository: FakeRepository
-) -> None:
-    created = client.post("/v1/routine-generations", json=_payload("idem-failed")).json()
-    request_id = uuid.UUID(created["request_id"])
-    fake_repository.set_state(request_id, state="NO_DISPONIBLE", error_code="llm_timeout")
-
-    response = client.get(f"/v1/routine-generations/{request_id}")
-    body = response.json()
-    assert body["status"] == "failed"
-    assert body["error"] == "llm_timeout"
-
-
-def test_get_failed_request_with_business_violations(
-    client: TestClient, fake_repository: FakeRepository
-) -> None:
-    created = client.post("/v1/routine-generations", json=_payload("idem-invalid")).json()
-    request_id = uuid.UUID(created["request_id"])
-    fake_repository.set_state(
-        request_id,
-        state="NO_DISPONIBLE",
-        error_code="objetivo vacio; frecuencia_semanal fuera de RN-38 (1-7)",
-    )
-
-    response = client.get(f"/v1/routine-generations/{request_id}")
-    body = response.json()
-    assert body["violaciones"] == ["objetivo vacio", "frecuencia_semanal fuera de RN-38 (1-7)"]
 
 
 def test_health_does_not_require_dependencies() -> None:
-    response = TestClient(create_app()).get("/health")
+    response = TestClient(api_module.app).get("/health")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
 
-def test_ready_requires_service_authentication() -> None:
-    app = create_app()
-    app.dependency_overrides[get_settings] = _test_settings
+def test_local_queue_mode_is_rejected_outside_local_environment(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("GENERATION_QUEUE_MODE", "local")
 
-    response = TestClient(app).get("/ready")
+    with raises(ConfigurationError, match="only allowed with APP_ENV=local"):
+        Settings.from_env()
+
+
+def test_local_worker_retries_a_recorded_generation_failure(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    request_id = UUID("83271cf7-9264-47b5-b85f-d09f05c99326")
+    calls = 0
+
+    async def process(_request_id: UUID, _settings: Settings) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise GenerationProcessingError("retryable failure")
+
+    monkeypatch.setattr(api_module, "process_generation", process)
+
+    asyncio.run(
+        api_module.process_generation_locally(
+            request_id,
+            settings(),
+            asyncio.Semaphore(1),
+        )
+    )
+
+    assert calls == 2
+
+
+def test_local_environment_rejects_a_remote_database(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("GENERATION_QUEUE_MODE", "local")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://example.invalid/gym-test")
+
+    with raises(ConfigurationError, match="requires a local PostgreSQL"):
+        Settings.from_env()
+
+
+def test_local_startup_recovers_pending_failed_attempts(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    request_id = UUID("83271cf7-9264-47b5-b85f-d09f05c99326")
+    processed: list[UUID] = []
+
+    async def list_retryable(
+        _repository: GenerationRepository,
+    ) -> list[UUID]:
+        return [request_id]
+
+    async def process(actual_request_id: UUID, _settings: Settings) -> None:
+        processed.append(actual_request_id)
+
+    monkeypatch.setattr(
+        GenerationRepository,
+        "retryable_request_ids",
+        list_retryable,
+    )
+    monkeypatch.setattr(api_module, "process_generation", process)
+
+    asyncio.run(
+        api_module.recover_local_retryable_generations(
+            settings(),
+            asyncio.Semaphore(1),
+        )
+    )
+
+    assert processed == [request_id]
+
+
+def test_ready_requires_service_authentication(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(api_module, "get_settings", settings)
+    response = TestClient(api_module.app).get("/ready")
 
     assert response.status_code == 401
+    assert response.json() == {"detail": "unauthorized"}
 
 
-def test_ready_accepts_bearer_authorization() -> None:
-    app = create_app()
-    app.dependency_overrides[get_settings] = _test_settings
+def test_ready_checks_database_and_llm_with_bearer_auth(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    async def ping(_dependency: object) -> None:
+        return None
 
-    response = TestClient(app).get("/ready", headers={"Authorization": "Bearer service-secret"})
+    monkeypatch.setattr(api_module, "get_settings", settings)
+    monkeypatch.setattr(GenerationRepository, "ping", ping)
+    monkeypatch.setattr(api_module.OllamaClient, "ping", ping)
 
-    # Sin Postgres real en este entorno de tests (ver docstring de conftest.py): lo que
-    # importa acá es que el header Bearer pasó la autenticación (no 401), no que la DB
-    # responda 200.
+    response = TestClient(api_module.app).get(
+        "/ready",
+        headers={"Authorization": "Bearer service-secret"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready", "database": "up", "llm": "up"}
+
+
+def test_dispatches_only_an_existing_request(monkeypatch: MonkeyPatch) -> None:
+    request_id = "83271cf7-9264-47b5-b85f-d09f05c99326"
+
+    async def request_exists(
+        _repository: GenerationRepository, _request_id: object
+    ) -> bool:
+        return True
+
+    async def send(_queue: QueueClient, *_args: object, **_kwargs: object) -> str:
+        return "msg_123"
+
+    monkeypatch.setattr(api_module, "get_settings", settings)
+    monkeypatch.setattr(GenerationRepository, "request_exists", request_exists)
+    monkeypatch.setattr(QueueClient, "send", send)
+
+    response = TestClient(api_module.app).post(
+        f"/v1/generation-requests/{request_id}/dispatch",
+        headers={"Authorization": "Bearer service-secret"},
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "request_id": request_id,
+        "status": "queued",
+        "message_id": "msg_123",
+    }
+
+
+def test_local_dispatch_wakes_persistent_worker_without_vercel_queue(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    request_id = "83271cf7-9264-47b5-b85f-d09f05c99326"
+    local_settings = replace(settings(), app_env="local", generation_queue_mode="local")
+    processed: list[tuple[object, Settings]] = []
+    finished = Event()
+    available = False
+
+    async def request_exists(
+        _repository: GenerationRepository, _request_id: object
+    ) -> bool:
+        nonlocal available
+        available = True
+        return True
+
+    async def list_retryable(_repository: GenerationRepository) -> list[UUID]:
+        return [UUID(request_id)] if available else []
+
+    async def process_generation(
+        actual_request_id: object, actual_settings: Settings
+    ) -> None:
+        nonlocal available
+        processed.append((actual_request_id, actual_settings))
+        available = False
+        finished.set()
+
+    monkeypatch.setenv("GENERATION_QUEUE_MODE", "local")
+    monkeypatch.setattr(api_module, "get_settings", lambda: local_settings)
+    monkeypatch.setattr(GenerationRepository, "request_exists", request_exists)
+    monkeypatch.setattr(GenerationRepository, "retryable_request_ids", list_retryable)
+    monkeypatch.setattr(api_module, "process_generation", process_generation)
+
+    with TestClient(api_module.create_app()) as client:
+        response = client.post(
+            f"/v1/generation-requests/{request_id}/dispatch",
+            headers={"Authorization": "Bearer service-secret"},
+        )
+        assert finished.wait(timeout=1)
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "request_id": request_id,
+        "status": "queued",
+        "message_id": None,
+    }
+    assert len(processed) == 1
+    assert str(processed[0][0]) == request_id
+    assert processed[0][1] == local_settings
+
+
+def test_local_worker_keeps_polling_after_a_temporary_database_failure(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    calls = 0
+
+    async def run() -> None:
+        finished = asyncio.Event()
+
+        async def scan(_settings: Settings, _semaphore: asyncio.Semaphore) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise ConnectionError("database temporarily unavailable")
+            finished.set()
+
+        monkeypatch.setattr(api_module, "recover_local_retryable_generations", scan)
+        worker = asyncio.create_task(
+            api_module.run_local_generation_worker(
+                settings(), asyncio.Semaphore(1), asyncio.Event(), poll_seconds=0.01
+            )
+        )
+        try:
+            await asyncio.wait_for(finished.wait(), timeout=1)
+        finally:
+            worker.cancel()
+            with raises(asyncio.CancelledError):
+                await worker
+
+    asyncio.run(run())
+    assert calls >= 2
+
+
+def test_dispatch_does_not_queue_a_missing_request(monkeypatch: MonkeyPatch) -> None:
+    async def request_does_not_exist(
+        _repository: GenerationRepository, _request_id: object
+    ) -> bool:
+        return False
+
+    async def send(_queue: QueueClient, *_args: object, **_kwargs: object) -> str:
+        raise AssertionError("Queue must not receive an unknown request")
+
+    monkeypatch.setattr(api_module, "get_settings", settings)
+    monkeypatch.setattr(
+        GenerationRepository, "request_exists", request_does_not_exist
+    )
+    monkeypatch.setattr(QueueClient, "send", send)
+
+    response = TestClient(api_module.app).post(
+        "/v1/generation-requests/83271cf7-9264-47b5-b85f-d09f05c99326/dispatch",
+        headers={"Authorization": "Bearer service-secret"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "generation_request_not_found"}
+
+
+def test_dispatch_returns_retryable_unavailable_without_queue_credentials(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    async def request_exists(
+        _repository: GenerationRepository, _request_id: object
+    ) -> bool:
+        return True
+
+    async def send(_queue: QueueClient, *_args: object, **_kwargs: object) -> str:
+        raise TokenResolutionError("missing queue token")
+
+    monkeypatch.setattr(api_module, "get_settings", settings)
+    monkeypatch.setattr(GenerationRepository, "request_exists", request_exists)
+    monkeypatch.setattr(QueueClient, "send", send)
+
+    response = TestClient(api_module.app).post(
+        "/v1/generation-requests/83271cf7-9264-47b5-b85f-d09f05c99326/dispatch",
+        headers={"Authorization": "Bearer service-secret"},
+    )
+
     assert response.status_code == 503
+    assert response.json() == {"detail": "generation_queue_unavailable"}
+
+
+def test_dispatch_treats_an_idempotent_queue_duplicate_as_accepted(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    async def request_exists(
+        _repository: GenerationRepository, _request_id: object
+    ) -> bool:
+        return True
+
+    async def send(_queue: QueueClient, *_args: object, **_kwargs: object) -> str:
+        raise DuplicateIdempotencyKeyError("duplicate")
+
+    monkeypatch.setattr(api_module, "get_settings", settings)
+    monkeypatch.setattr(GenerationRepository, "request_exists", request_exists)
+    monkeypatch.setattr(QueueClient, "send", send)
+
+    response = TestClient(api_module.app).post(
+        "/v1/generation-requests/83271cf7-9264-47b5-b85f-d09f05c99326/dispatch",
+        headers={"Authorization": "Bearer service-secret"},
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "request_id": "83271cf7-9264-47b5-b85f-d09f05c99326",
+        "status": "queued",
+        "message_id": None,
+    }

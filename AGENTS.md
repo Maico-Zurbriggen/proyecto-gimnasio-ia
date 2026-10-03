@@ -12,15 +12,14 @@ La documentación canónica vive en `Maico-Zurbriggen/proyecto-gimnasio-document
 - Publicar OpenAPI versionado como fuente de verdad para backend.
 - Aceptar solicitudes idempotentes con `202`; nunca esperar al LLM dentro de la petición.
 - Desplegar API y consumidor en Vercel; procesar mediante Vercel Queues y conservar lease e idempotencia en PostgreSQL.
-- Recibir del backend una solicitud idempotente con contexto minimizado y catálogo prescribible prefiltrado; persistirla en `ai_integration` y publicar sólo su UUID en la cola.
+- Recibir del backend sólo el UUID de una solicitud que ya existe en `ai_integration`.
 - Llamar al LLM sólo mediante un conector privado y validar su salida estructural.
 - Escribir únicamente estados y resultados en estructuras de integración acordadas.
 - No crear, aprobar, asignar ni activar rutinas; backend conserva reglas y autoridad.
 - Cada intento vence inicialmente a los 120 segundos y admite un único reintento.
 - Tras el segundo fallo registrar indisponibilidad; no generar fallback determinístico.
 - Limitar inicialmente la concurrencia del consumidor a uno para proteger Ollama.
-- El conector a Ollama usa exclusivamente el dominio HTTPS estable de Cloudflare Tunnel y envía `LLM_API_TOKEN` como Bearer; nunca exponer Ollama sin protección.
-- `LLM_PROVIDER` admite `ollama` u `openai`; para OpenAI usar `OPENAI_API_KEY` (no el Bearer de Cloudflare Tunnel, exclusivo del conector Ollama).
+- El conector a Ollama usa `LLM_API_URL` con el prefijo `/polo`, envía `LLM_API_TOKEN` (el secreto `POLO_API_TOKEN`) como Bearer y agrega `ngrok-skip-browser-warning: 1`; nunca exponer Ollama sin protección.
 
 ## Datos y seguridad
 
