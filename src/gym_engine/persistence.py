@@ -82,9 +82,12 @@ class GenerationRepository:
         configuration_version: str,
         max_attempts: int = 2,
     ) -> ClaimedGeneration | None:
-        async with await psycopg.AsyncConnection.connect(
-            self._database_url, row_factory=dict_row, connect_timeout=5
-        ) as connection, connection.transaction():
+        async with (
+            await psycopg.AsyncConnection.connect(
+                self._database_url, row_factory=dict_row, connect_timeout=5
+            ) as connection,
+            connection.transaction(),
+        ):
             cursor = await connection.execute(
                 """
                     SELECT id, minimized_context, preferences, retention_until
@@ -137,9 +140,9 @@ class GenerationRepository:
                     (request_id,),
                 )
                 return None
-            input_hash = _hash_input(
-                request["minimized_context"], request["preferences"]
-            )
+            input_hash = _hash_input(request["minimized_context"], request["preferences"])
+            if request["preferences"].get("schema_version") == "2.0":
+                contract_version = "routine-generation@2.0"
             lease_until = datetime.now(UTC) + timedelta(seconds=lease_seconds)
 
             await connection.execute(
@@ -191,42 +194,45 @@ class GenerationRepository:
         model_version: str,
         configuration_version: str,
     ) -> None:
-        async with await psycopg.AsyncConnection.connect(
-            self._database_url, connect_timeout=5
-        ) as connection, connection.transaction():
-                await connection.execute(
-                    """
+        async with (
+            await psycopg.AsyncConnection.connect(
+                self._database_url, connect_timeout=5
+            ) as connection,
+            connection.transaction(),
+        ):
+            await connection.execute(
+                """
                     INSERT INTO ai_integration.ai_generation_results (
                       attempt_id, structured_output, output_hash,
                       structurally_valid, retention_until
                     )
                     VALUES (%s, %s::jsonb, %s, true, %s)
                     """,
-                    (
-                        claimed.attempt_id,
-                        json.dumps(output, ensure_ascii=False),
-                        output_hash,
-                        claimed.retention_until,
-                    ),
-                )
-                await connection.execute(
-                    """
+                (
+                    claimed.attempt_id,
+                    json.dumps(output, ensure_ascii=False),
+                    output_hash,
+                    claimed.retention_until,
+                ),
+            )
+            await connection.execute(
+                """
                     UPDATE ai_integration.ai_generation_attempts
                     SET state = 'COMPLETADO', finished_at = now(),
                         model_version = %s, configuration_version = %s
                     WHERE id = %s
                     """,
-                    (model_version, configuration_version, claimed.attempt_id),
-                )
-                await connection.execute(
-                    """
+                (model_version, configuration_version, claimed.attempt_id),
+            )
+            await connection.execute(
+                """
                     UPDATE ai_integration.ai_generation_requests
                     SET state = 'COMPLETADA', finished_at = now(),
                         lease_owner = NULL, lease_until = NULL
                     WHERE id = %s
                     """,
-                    (claimed.request_id,),
-                )
+                (claimed.request_id,),
+            )
 
     async def fail(
         self,
@@ -237,20 +243,23 @@ class GenerationRepository:
     ) -> bool:
         exhausted = claimed.attempt_number >= max_attempts
         request_state = "NO_DISPONIBLE" if exhausted else "PENDIENTE"
-        async with await psycopg.AsyncConnection.connect(
-            self._database_url, connect_timeout=5
-        ) as connection, connection.transaction():
-                await connection.execute(
-                    """
+        async with (
+            await psycopg.AsyncConnection.connect(
+                self._database_url, connect_timeout=5
+            ) as connection,
+            connection.transaction(),
+        ):
+            await connection.execute(
+                """
                     UPDATE ai_integration.ai_generation_attempts
                     SET state = %s::ai_integration."AiGenerationAttemptState",
                         finished_at = now(), error_code = %s
                     WHERE id = %s
                     """,
-                    (attempt_state, error_code, claimed.attempt_id),
-                )
-                await connection.execute(
-                    """
+                (attempt_state, error_code, claimed.attempt_id),
+            )
+            await connection.execute(
+                """
                     UPDATE ai_integration.ai_generation_requests
                     SET state = %s::ai_integration."AiGenerationRequestState",
                         available_at = CASE WHEN %s THEN available_at ELSE now() END,
@@ -258,8 +267,8 @@ class GenerationRepository:
                         lease_owner = NULL, lease_until = NULL
                     WHERE id = %s
                     """,
-                    (request_state, exhausted, exhausted, claimed.request_id),
-                )
+                (request_state, exhausted, exhausted, claimed.request_id),
+            )
         return exhausted
 
 

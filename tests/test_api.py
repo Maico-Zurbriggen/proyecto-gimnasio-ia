@@ -145,9 +145,7 @@ def test_ready_checks_database_and_llm_with_bearer_auth(
 def test_dispatches_only_an_existing_request(monkeypatch: MonkeyPatch) -> None:
     request_id = "83271cf7-9264-47b5-b85f-d09f05c99326"
 
-    async def request_exists(
-        _repository: GenerationRepository, _request_id: object
-    ) -> bool:
+    async def request_exists(_repository: GenerationRepository, _request_id: object) -> bool:
         return True
 
     async def send(_queue: QueueClient, *_args: object, **_kwargs: object) -> str:
@@ -179,9 +177,7 @@ def test_local_dispatch_wakes_persistent_worker_without_vercel_queue(
     finished = Event()
     available = False
 
-    async def request_exists(
-        _repository: GenerationRepository, _request_id: object
-    ) -> bool:
+    async def request_exists(_repository: GenerationRepository, _request_id: object) -> bool:
         nonlocal available
         available = True
         return True
@@ -189,9 +185,7 @@ def test_local_dispatch_wakes_persistent_worker_without_vercel_queue(
     async def list_retryable(_repository: GenerationRepository) -> list[UUID]:
         return [UUID(request_id)] if available else []
 
-    async def process_generation(
-        actual_request_id: object, actual_settings: Settings
-    ) -> None:
+    async def process_generation(actual_request_id: object, actual_settings: Settings) -> None:
         nonlocal available
         processed.append((actual_request_id, actual_settings))
         available = False
@@ -263,9 +257,7 @@ def test_dispatch_does_not_queue_a_missing_request(monkeypatch: MonkeyPatch) -> 
         raise AssertionError("Queue must not receive an unknown request")
 
     monkeypatch.setattr(api_module, "get_settings", settings)
-    monkeypatch.setattr(
-        GenerationRepository, "request_exists", request_does_not_exist
-    )
+    monkeypatch.setattr(GenerationRepository, "request_exists", request_does_not_exist)
     monkeypatch.setattr(QueueClient, "send", send)
 
     response = TestClient(api_module.app).post(
@@ -280,9 +272,7 @@ def test_dispatch_does_not_queue_a_missing_request(monkeypatch: MonkeyPatch) -> 
 def test_dispatch_returns_retryable_unavailable_without_queue_credentials(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    async def request_exists(
-        _repository: GenerationRepository, _request_id: object
-    ) -> bool:
+    async def request_exists(_repository: GenerationRepository, _request_id: object) -> bool:
         return True
 
     async def send(_queue: QueueClient, *_args: object, **_kwargs: object) -> str:
@@ -304,9 +294,7 @@ def test_dispatch_returns_retryable_unavailable_without_queue_credentials(
 def test_dispatch_treats_an_idempotent_queue_duplicate_as_accepted(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    async def request_exists(
-        _repository: GenerationRepository, _request_id: object
-    ) -> bool:
+    async def request_exists(_repository: GenerationRepository, _request_id: object) -> bool:
         return True
 
     async def send(_queue: QueueClient, *_args: object, **_kwargs: object) -> str:

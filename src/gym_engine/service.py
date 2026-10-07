@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from .config import Settings
 from .llm import InvalidPrescriptionError, OllamaClient
+from .llm_v2 import ContextCapacityError, configuration_signature
 from .persistence import GenerationRepository
 
 logger = getLogger(__name__)
@@ -21,13 +22,16 @@ class GenerationProcessingError(RuntimeError):
 
 async def process_generation(request_id: UUID, settings: Settings) -> None:
     repository = GenerationRepository(settings.database_url)
+    configuration = configuration_signature(
+        settings.configuration_version, settings.context_tokens, settings.response_tokens
+    )
     claimed = await repository.claim(
         request_id=request_id,
         worker_id=f"{settings.generation_queue_mode}:{socket.gethostname()}",
         lease_seconds=settings.timeout_seconds + 30,
         contract_version="routine-generation@1.0",
         model_version=settings.llm_model,
-        configuration_version=settings.configuration_version,
+        configuration_version=configuration,
         max_attempts=settings.max_attempts,
     )
     if claimed is None:
@@ -38,6 +42,8 @@ async def process_generation(request_id: UUID, settings: Settings) -> None:
         model=settings.llm_model,
         api_token=settings.llm_api_token,
         timeout_seconds=settings.timeout_seconds,
+        context_tokens=settings.context_tokens,
+        response_tokens=settings.response_tokens,
     )
     try:
         result = await client.generate_routine(
@@ -48,7 +54,14 @@ async def process_generation(request_id: UUID, settings: Settings) -> None:
             output=result.output.model_dump(mode="json"),
             output_hash=result.output_hash,
             model_version=result.model_version,
-            configuration_version=settings.configuration_version,
+            configuration_version=configuration,
+        )
+    except ContextCapacityError:
+        await repository.fail(
+            claimed,
+            attempt_state="FALLIDO",
+            error_code="context_capacity_exceeded",
+            max_attempts=claimed.attempt_number,
         )
     except asyncio.CancelledError:
         await repository.fail(

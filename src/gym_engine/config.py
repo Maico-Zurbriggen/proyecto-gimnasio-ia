@@ -35,6 +35,16 @@ class Settings:
     configuration_version: str
     timeout_seconds: int
     max_attempts: int
+    context_tokens: int = 32768
+    response_tokens: int = 4096
+
+    def __post_init__(self) -> None:
+        if (
+            self.context_tokens < 4096
+            or self.response_tokens < 256
+            or self.response_tokens + 2048 >= self.context_tokens
+        ):
+            raise ConfigurationError("LLM context and response capacities are invalid")
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -48,17 +58,13 @@ class Settings:
         elif queue_mode == "local":
             generation_queue_mode = "local"
         else:
-            raise ConfigurationError(
-                "GENERATION_QUEUE_MODE must be either 'vercel' or 'local'"
-            )
+            raise ConfigurationError("GENERATION_QUEUE_MODE must be either 'vercel' or 'local'")
         if generation_queue_mode == "local" and app_env != "local":
             raise ConfigurationError(
                 "GENERATION_QUEUE_MODE=local is only allowed with APP_ENV=local"
             )
         if app_env == "production" and generation_queue_mode != "vercel":
-            raise ConfigurationError(
-                "Production must use the durable Vercel generation queue"
-            )
+            raise ConfigurationError("Production must use the durable Vercel generation queue")
         database_url = _required("DATABASE_URL")
         if app_env == "local" and urlsplit(database_url).hostname not in {
             "localhost",
@@ -76,8 +82,10 @@ class Settings:
             llm_model=_required("LLM_MODEL"),
             llm_api_token=_required("LLM_API_TOKEN"),
             configuration_version=os.getenv(
-                "LLM_CONFIGURATION_VERSION", "generative/generar-rutina@10"
+                "LLM_CONFIGURATION_VERSION", "generative/generar-rutina@11"
             ).strip(),
             timeout_seconds=int(os.getenv("GENERATION_TIMEOUT_SECONDS", "120")),
             max_attempts=retries + 1,
+            context_tokens=int(os.getenv("LLM_CONTEXT_TOKENS", "32768")),
+            response_tokens=int(os.getenv("LLM_RESPONSE_TOKENS", "4096")),
         )
