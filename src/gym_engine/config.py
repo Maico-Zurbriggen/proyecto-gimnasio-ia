@@ -35,8 +35,8 @@ class Settings:
     configuration_version: str
     timeout_seconds: int
     max_attempts: int
-    context_tokens: int = 32768
-    response_tokens: int = 4096
+    context_tokens: int = 131072
+    response_tokens: int = 8192
 
     def __post_init__(self) -> None:
         if (
@@ -82,10 +82,10 @@ class Settings:
             llm_model=_required("LLM_MODEL"),
             llm_api_token=_required("LLM_API_TOKEN"),
             configuration_version=os.getenv(
-                "LLM_CONFIGURATION_VERSION", "generative/generar-rutina@11"
+                "LLM_CONFIGURATION_VERSION", "generative/generar-rutina@26"
             ).strip(),
             timeout_seconds=int(os.getenv("GENERATION_TIMEOUT_SECONDS", "120")),
             max_attempts=retries + 1,
-            context_tokens=int(os.getenv("LLM_CONTEXT_TOKENS", "32768")),
-            response_tokens=int(os.getenv("LLM_RESPONSE_TOKENS", "4096")),
+            context_tokens=int(os.getenv("LLM_CONTEXT_TOKENS", "131072")),
+            response_tokens=int(os.getenv("LLM_RESPONSE_TOKENS", "8192")),
         )

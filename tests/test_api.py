@@ -1,19 +1,22 @@
 import asyncio
 from dataclasses import replace
+from datetime import UTC, datetime
 from threading import Event
+from unittest.mock import AsyncMock, Mock
 from uuid import UUID
 
 from fastapi.testclient import TestClient
-from pytest import MonkeyPatch, raises
+from pytest import MonkeyPatch, mark, raises
 from vercel.queue import (
     DuplicateIdempotencyKeyError,
     QueueClient,
     TokenResolutionError,
 )
 
+from gym_engine import service as service_module
 from gym_engine.api import app as api_module
 from gym_engine.config import ConfigurationError, Settings
-from gym_engine.persistence import GenerationRepository
+from gym_engine.persistence import ClaimedGeneration, GenerationRepository
 from gym_engine.service import GenerationProcessingError
 
 
@@ -33,6 +36,41 @@ def settings() -> Settings:
     )
 
 
+@mark.parametrize(
+    "error_code", ["gym_work_sets_outside_settings", "routine_regeneration_candidate_unchanged"]
+)
+def test_validation_is_recorded_and_supplied_to_the_durable_retry(
+    monkeypatch: MonkeyPatch,
+    error_code: str,
+) -> None:
+    claimed = ClaimedGeneration(
+        request_id=UUID("83271cf7-9264-47b5-b85f-d09f05c99326"),
+        attempt_id=UUID("83271cf7-9264-47b5-b85f-d09f05c99327"),
+        attempt_number=2,
+        minimized_context={},
+        preferences={"schema_version": "2.0"},
+        retention_until=datetime.now(UTC),
+        previous_error_code=error_code,
+    )
+    repository = Mock(claim=AsyncMock(return_value=claimed), fail=AsyncMock(return_value=True))
+    client = Mock(generate_routine=AsyncMock(side_effect=ValueError(error_code)))
+    monkeypatch.setattr(service_module, "GenerationRepository", lambda _url: repository)
+    monkeypatch.setattr(service_module, "OllamaClient", lambda **_kwargs: client)
+    asyncio.run(service_module.process_generation(claimed.request_id, settings()))
+    client.generate_routine.assert_awaited_once_with(
+        claimed.minimized_context,
+        claimed.preferences,
+        retry=True,
+        validation_feedback=error_code,
+    )
+    repository.fail.assert_awaited_once_with(
+        claimed,
+        attempt_state="SALIDA_INVALIDA",
+        error_code=error_code,
+        max_attempts=2,
+    )
+
+
 def test_health_does_not_require_dependencies() -> None:
     response = TestClient(api_module.app).get("/health")
 
@@ -48,6 +86,29 @@ def test_local_queue_mode_is_rejected_outside_local_environment(
 
     with raises(ConfigurationError, match="only allowed with APP_ENV=local"):
         Settings.from_env()
+
+
+def test_settings_default_generation_budget_supports_routine_renewal(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    for name, value in {
+        "APP_ENV": "local",
+        "GENERATION_QUEUE_MODE": "local",
+        "DATABASE_URL": "postgresql://127.0.0.1/gym-test",
+        "AI_SERVICE_API_KEY": "service-secret",
+        "LLM_API_URL": "https://llm.example.invalid",
+        "LLM_MODEL": "qwen3.5:9b-instruct",
+        "LLM_API_TOKEN": "llm-secret",
+        "GENERATION_MAX_RETRIES": "1",
+    }.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("LLM_RESPONSE_TOKENS", raising=False)
+    monkeypatch.delenv("LLM_CONFIGURATION_VERSION", raising=False)
+
+    configured = Settings.from_env()
+
+    assert configured.response_tokens == 8192
+    assert configured.configuration_version == "generative/generar-rutina@26"
 
 
 def test_local_worker_retries_a_recorded_generation_failure(

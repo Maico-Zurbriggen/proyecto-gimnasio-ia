@@ -307,6 +307,7 @@ class OllamaClient:
         preferences: dict[str, Any],
         *,
         retry: bool = False,
+        validation_feedback: str | None = None,
     ) -> LlmResult:
         if preferences.get("schema_version") == "2.0":
             output, output_hash, model = await generate_v2(
@@ -319,6 +320,7 @@ class OllamaClient:
                 context=minimized_context,
                 preferences=preferences,
                 retry=retry,
+                validation_feedback=validation_feedback,
             )
             return LlmResult(output=output, output_hash=output_hash, model_version=model)
         output_schema = CompactRoutinePlan.model_json_schema()

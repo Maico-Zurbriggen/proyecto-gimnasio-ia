@@ -19,6 +19,7 @@ class ClaimedGeneration:
     minimized_context: dict[str, Any]
     preferences: dict[str, Any]
     retention_until: datetime
+    previous_error_code: str | None = None
 
 
 class GenerationRepository:
@@ -129,6 +130,14 @@ class GenerationRepository:
             if attempt_row is None:
                 raise RuntimeError("Could not allocate a generation attempt")
             attempt_number = int(attempt_row["attempt_number"])
+            previous_cursor = await connection.execute(
+                """
+                    SELECT error_code FROM ai_integration.ai_generation_attempts
+                    WHERE request_id = %s ORDER BY attempt_number DESC LIMIT 1
+                """,
+                (request_id,),
+            )
+            previous_attempt = await previous_cursor.fetchone()
             if attempt_number > max_attempts:
                 await connection.execute(
                     """
@@ -184,6 +193,7 @@ class GenerationRepository:
                 minimized_context=request["minimized_context"],
                 preferences=request["preferences"],
                 retention_until=request["retention_until"],
+                previous_error_code=previous_attempt["error_code"] if previous_attempt else None,
             )
 
     async def complete(

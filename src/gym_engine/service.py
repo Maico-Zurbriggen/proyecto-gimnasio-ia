@@ -9,6 +9,7 @@ import httpx
 from pydantic import ValidationError
 
 from .config import Settings
+from .generation_prompts import VALIDATION_CORRECTIONS
 from .llm import InvalidPrescriptionError, OllamaClient
 from .llm_v2 import ContextCapacityError, configuration_signature
 from .persistence import GenerationRepository
@@ -47,7 +48,10 @@ async def process_generation(request_id: UUID, settings: Settings) -> None:
     )
     try:
         result = await client.generate_routine(
-            claimed.minimized_context, claimed.preferences, retry=claimed.attempt_number > 1
+            claimed.minimized_context,
+            claimed.preferences,
+            retry=claimed.attempt_number > 1,
+            validation_feedback=claimed.previous_error_code,
         )
         await repository.complete(
             claimed=claimed,
@@ -104,16 +108,21 @@ async def process_generation(request_id: UUID, settings: Settings) -> None:
         if not exhausted:
             raise GenerationProcessingError("LLM returned invalid output") from error
     except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+        reason = (
+            str(error).splitlines()[0][:120] if isinstance(error, ValueError) else "unclassified"
+        )
+        validation_error = reason if reason in VALIDATION_CORRECTIONS else None
         logger.warning(
-            "Generation request %s failed during LLM processing (%s; status=%s)",
+            "Generation request %s failed during LLM processing (%s; status=%s; reason=%s)",
             request_id,
             type(error).__name__,
             error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None,
+            reason,
         )
         exhausted = await repository.fail(
             claimed,
-            attempt_state="FALLIDO",
-            error_code="llm_request_failed",
+            attempt_state="SALIDA_INVALIDA" if validation_error else "FALLIDO",
+            error_code=validation_error or "llm_request_failed",
             max_attempts=settings.max_attempts,
         )
         if not exhausted:
