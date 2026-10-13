@@ -16,9 +16,12 @@ from .contracts import (
     RoutineDayOutput,
     RoutineExerciseOutput,
     RoutineGenerationOutput,
+    RoutineProposalV2,
+    RoutineUnableV2,
     TrainingPurpose,
 )
 from .llm_schema import build_native_generation_schema
+from .llm_v2 import generate_v2
 
 
 class SetGroupPlan(BaseModel):
@@ -256,7 +259,7 @@ class CompactRoutinePlan(BaseModel):
 
 @dataclass(frozen=True)
 class LlmResult:
-    output: RoutineGenerationOutput
+    output: RoutineGenerationOutput | RoutineProposalV2 | RoutineUnableV2
     output_hash: str
     model_version: str
 
@@ -272,6 +275,8 @@ class OllamaClient:
         model: str,
         api_token: str,
         timeout_seconds: int,
+        context_tokens: int = 32768,
+        response_tokens: int = 4096,
     ) -> None:
         self._base_url = base_url
         self._model = model
@@ -280,6 +285,8 @@ class OllamaClient:
             "ngrok-skip-browser-warning": "1",
         }
         self._timeout = timeout_seconds
+        self._context_tokens = context_tokens
+        self._response_tokens = response_tokens
 
     async def ping(self) -> None:
         async with httpx.AsyncClient(
@@ -300,7 +307,22 @@ class OllamaClient:
         preferences: dict[str, Any],
         *,
         retry: bool = False,
+        validation_feedback: str | None = None,
     ) -> LlmResult:
+        if preferences.get("schema_version") == "2.0":
+            output, output_hash, model = await generate_v2(
+                base_url=self._base_url,
+                model=self._model,
+                headers=self._headers,
+                timeout=self._timeout,
+                context_tokens=self._context_tokens,
+                response_tokens=self._response_tokens,
+                context=minimized_context,
+                preferences=preferences,
+                retry=retry,
+                validation_feedback=validation_feedback,
+            )
+            return LlmResult(output=output, output_hash=output_hash, model_version=model)
         output_schema = CompactRoutinePlan.model_json_schema()
         catalog: list[dict[str, Any]] = preferences.get("allowed_catalog", [])
         if not catalog:

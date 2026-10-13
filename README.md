@@ -69,3 +69,9 @@ python -m pytest
 ```
 
 La interfaz con el backend está descrita en `architecture/data-interface.md` del [repositorio documental](https://github.com/Maico-Zurbriggen/proyecto-gimnasio-documentacion). Allí también viven el corpus funcional, la arquitectura y las reglas de dominio. Para trabajo asistido por IA, comenzar por su `AGENTS.md` y `manifest.json`.
+
+## Catálogo de ejercicios
+
+Implementación y operación de RepDB, habilitaciones y generación `2.0`: [documentación canónica](https://github.com/Maico-Zurbriggen/proyecto-gimnasio-documentacion/blob/main/architecture/exercise-catalog.md).
+
+Exportar el schema de persistencia `2.0` con `python scripts/export_generation_contract.py`. Configurar `LLM_CONTEXT_TOKENS` y `LLM_RESPONSE_TOKENS` según la capacidad verificada del runtime.

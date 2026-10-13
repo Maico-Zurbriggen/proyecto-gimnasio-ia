@@ -15,7 +15,8 @@ La documentación canónica vive en `Maico-Zurbriggen/proyecto-gimnasio-document
 - Recibir del backend sólo el UUID de una solicitud que ya existe en `ai_integration`.
 - Llamar al LLM sólo mediante un conector privado y validar su salida estructural.
 - Escribir únicamente estados y resultados en estructuras de integración acordadas.
-- No crear, aprobar, asignar ni activar rutinas; backend conserva reglas y autoridad.
+- No crear, aprobar, asignar ni activar rutinas; backend conserva autorización e integridad técnica. En contrato `2.0`, IA decide adecuación, selección y prescripción según ADR 0013, con aprobación posterior del entrenador.
+- Entregar todo el catálogo habilitado al modelo; sin top-k, filtros de entrenamiento, rangos prefijados ni fallback. Versionar también el schema de persistencia y comprobar capacidad sin truncamiento.
 - Cada intento vence inicialmente a los 120 segundos y admite un único reintento.
 - Tras el segundo fallo registrar indisponibilidad; no generar fallback determinístico.
 - Limitar inicialmente la concurrencia del consumidor a uno para proteger Ollama.
@@ -26,7 +27,7 @@ La documentación canónica vive en `Maico-Zurbriggen/proyecto-gimnasio-document
 - Construir features point-in-time: ninguna fila puede usar información posterior al instante predicho.
 - Separar train, validation y test por tiempo o usuario; documentar la elección.
 - Comparar todo modelo contra un criterio de referencia simple.
-- Preferir una regla cuando el modelo no aporte una mejora medible.
+- Para analítica batch, preferir una regla cuando el modelo no aporte una mejora medible. Esta pauta no autoriza filtros o prescripciones deterministas en generación `2.0`.
 - Fijar seeds, versiones, parámetros y artefactos necesarios para reproducir resultados.
 - No usar datos personales reales ni subir datasets sensibles, modelos grandes o notebooks con salidas privadas.
 - Los notebooks son exploratorios; la lógica aceptada debe migrar a módulos y tests.
