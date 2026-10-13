@@ -55,9 +55,7 @@ async def recover_local_retryable_generations(
     settings: Settings,
     semaphore: asyncio.Semaphore,
 ) -> None:
-    request_ids = await GenerationRepository(
-        settings.database_url
-    ).retryable_request_ids()
+    request_ids = await GenerationRepository(settings.database_url).retryable_request_ids()
     for request_id in request_ids:
         try:
             await process_generation_locally(request_id, settings, semaphore)
@@ -147,9 +145,7 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @application.get(
-        "/ready", tags=["operations"], dependencies=[Depends(require_service_key)]
-    )
+    @application.get("/ready", tags=["operations"], dependencies=[Depends(require_service_key)])
     async def ready() -> dict[str, str]:
         try:
             settings = get_settings()
@@ -209,9 +205,7 @@ def create_app() -> FastAPI:
             return DispatchResponse(request_id=request_id)
         except QueueError as error:
             logger.warning("Queue dispatch failed (%s)", type(error).__name__)
-            raise HTTPException(
-                status_code=503, detail="generation_queue_unavailable"
-            ) from error
+            raise HTTPException(status_code=503, detail="generation_queue_unavailable") from error
         return DispatchResponse(request_id=request_id, message_id=message_id)
 
     return application
