@@ -384,6 +384,13 @@ def validate_gym_settings(
                     raise ValueError("gym_rest_outside_settings")
 
 
+REVISION_TASKS = {"TRAINER_REGENERATION", "CHANGE_REQUEST"}
+REVISION_FEEDBACK_KEYS = {
+    "TRAINER_REGENERATION": "trainer_feedback",
+    "CHANGE_REQUEST": "change_request",
+}
+
+
 def validate_regeneration_candidate(
     output: RoutineProposalV2 | RoutineUnableV2, preferences: dict[str, Any]
 ) -> None:
@@ -393,7 +400,7 @@ def validate_regeneration_candidate(
     This does not select exercises or evaluate the training preference in code.
     """
     task = preferences.get("generation_task") or {}
-    if task.get("kind") != "TRAINER_REGENERATION" or not isinstance(output, RoutineProposalV2):
+    if task.get("kind") not in REVISION_TASKS or not isinstance(output, RoutineProposalV2):
         return
     previous = task.get("previous_candidate")
     if not isinstance(previous, dict) or not previous.get("days"):
@@ -504,7 +511,7 @@ async def generate_v2(
     wire = {
         key: value
         for key, value in preferences.items()
-        if key not in {"allowed_catalog", "local_test_regeneration"}
+        if key not in {"allowed_catalog", "local_test_regeneration", "routine_change_replacement"}
     }
     reference_indexes = {item["id"]: index for index, item in enumerate(catalog)}
     if renewal:
@@ -612,13 +619,13 @@ async def generate_v2(
                     **(
                         {
                             "task_reminder": {
-                                "trainer_feedback": preferences["generation_task"].get(
-                                    "trainer_feedback"
+                                REVISION_FEEDBACK_KEYS[kind]: preferences["generation_task"].get(
+                                    REVISION_FEEDBACK_KEYS[kind]
                                 )
                             }
                         }
-                        if (preferences.get("generation_task") or {}).get("kind")
-                        == "TRAINER_REGENERATION"
+                        if (kind := (preferences.get("generation_task") or {}).get("kind"))
+                        in REVISION_TASKS
                         else {}
                     ),
                     **(
