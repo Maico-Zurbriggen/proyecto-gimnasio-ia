@@ -1,19 +1,22 @@
 import asyncio
 from dataclasses import replace
+from datetime import UTC, datetime
 from threading import Event
+from unittest.mock import AsyncMock, Mock
 from uuid import UUID
 
 from fastapi.testclient import TestClient
-from pytest import MonkeyPatch, raises
+from pytest import MonkeyPatch, mark, raises
 from vercel.queue import (
     DuplicateIdempotencyKeyError,
     QueueClient,
     TokenResolutionError,
 )
 
+from gym_engine import service as service_module
 from gym_engine.api import app as api_module
 from gym_engine.config import ConfigurationError, Settings
-from gym_engine.persistence import GenerationRepository
+from gym_engine.persistence import ClaimedGeneration, GenerationRepository
 from gym_engine.service import GenerationProcessingError
 
 
@@ -33,6 +36,41 @@ def settings() -> Settings:
     )
 
 
+@mark.parametrize(
+    "error_code", ["gym_work_sets_outside_settings", "routine_regeneration_candidate_unchanged"]
+)
+def test_validation_is_recorded_and_supplied_to_the_durable_retry(
+    monkeypatch: MonkeyPatch,
+    error_code: str,
+) -> None:
+    claimed = ClaimedGeneration(
+        request_id=UUID("83271cf7-9264-47b5-b85f-d09f05c99326"),
+        attempt_id=UUID("83271cf7-9264-47b5-b85f-d09f05c99327"),
+        attempt_number=2,
+        minimized_context={},
+        preferences={"schema_version": "2.0"},
+        retention_until=datetime.now(UTC),
+        previous_error_code=error_code,
+    )
+    repository = Mock(claim=AsyncMock(return_value=claimed), fail=AsyncMock(return_value=True))
+    client = Mock(generate_routine=AsyncMock(side_effect=ValueError(error_code)))
+    monkeypatch.setattr(service_module, "GenerationRepository", lambda _url: repository)
+    monkeypatch.setattr(service_module, "OllamaClient", lambda **_kwargs: client)
+    asyncio.run(service_module.process_generation(claimed.request_id, settings()))
+    client.generate_routine.assert_awaited_once_with(
+        claimed.minimized_context,
+        claimed.preferences,
+        retry=True,
+        validation_feedback=error_code,
+    )
+    repository.fail.assert_awaited_once_with(
+        claimed,
+        attempt_state="SALIDA_INVALIDA",
+        error_code=error_code,
+        max_attempts=2,
+    )
+
+
 def test_health_does_not_require_dependencies() -> None:
     response = TestClient(api_module.app).get("/health")
 
@@ -48,6 +86,29 @@ def test_local_queue_mode_is_rejected_outside_local_environment(
 
     with raises(ConfigurationError, match="only allowed with APP_ENV=local"):
         Settings.from_env()
+
+
+def test_settings_default_generation_budget_supports_routine_renewal(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    for name, value in {
+        "APP_ENV": "local",
+        "GENERATION_QUEUE_MODE": "local",
+        "DATABASE_URL": "postgresql://127.0.0.1/gym-test",
+        "AI_SERVICE_API_KEY": "service-secret",
+        "LLM_API_URL": "https://llm.example.invalid",
+        "LLM_MODEL": "qwen3.5:9b-instruct",
+        "LLM_API_TOKEN": "llm-secret",
+        "GENERATION_MAX_RETRIES": "1",
+    }.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("LLM_RESPONSE_TOKENS", raising=False)
+    monkeypatch.delenv("LLM_CONFIGURATION_VERSION", raising=False)
+
+    configured = Settings.from_env()
+
+    assert configured.response_tokens == 8192
+    assert configured.configuration_version == "generative/generar-rutina@26"
 
 
 def test_local_worker_retries_a_recorded_generation_failure(
@@ -145,9 +206,7 @@ def test_ready_checks_database_and_llm_with_bearer_auth(
 def test_dispatches_only_an_existing_request(monkeypatch: MonkeyPatch) -> None:
     request_id = "83271cf7-9264-47b5-b85f-d09f05c99326"
 
-    async def request_exists(
-        _repository: GenerationRepository, _request_id: object
-    ) -> bool:
+    async def request_exists(_repository: GenerationRepository, _request_id: object) -> bool:
         return True
 
     async def send(_queue: QueueClient, *_args: object, **_kwargs: object) -> str:
@@ -179,9 +238,7 @@ def test_local_dispatch_wakes_persistent_worker_without_vercel_queue(
     finished = Event()
     available = False
 
-    async def request_exists(
-        _repository: GenerationRepository, _request_id: object
-    ) -> bool:
+    async def request_exists(_repository: GenerationRepository, _request_id: object) -> bool:
         nonlocal available
         available = True
         return True
@@ -189,9 +246,7 @@ def test_local_dispatch_wakes_persistent_worker_without_vercel_queue(
     async def list_retryable(_repository: GenerationRepository) -> list[UUID]:
         return [UUID(request_id)] if available else []
 
-    async def process_generation(
-        actual_request_id: object, actual_settings: Settings
-    ) -> None:
+    async def process_generation(actual_request_id: object, actual_settings: Settings) -> None:
         nonlocal available
         processed.append((actual_request_id, actual_settings))
         available = False
@@ -263,9 +318,7 @@ def test_dispatch_does_not_queue_a_missing_request(monkeypatch: MonkeyPatch) -> 
         raise AssertionError("Queue must not receive an unknown request")
 
     monkeypatch.setattr(api_module, "get_settings", settings)
-    monkeypatch.setattr(
-        GenerationRepository, "request_exists", request_does_not_exist
-    )
+    monkeypatch.setattr(GenerationRepository, "request_exists", request_does_not_exist)
     monkeypatch.setattr(QueueClient, "send", send)
 
     response = TestClient(api_module.app).post(
@@ -280,9 +333,7 @@ def test_dispatch_does_not_queue_a_missing_request(monkeypatch: MonkeyPatch) -> 
 def test_dispatch_returns_retryable_unavailable_without_queue_credentials(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    async def request_exists(
-        _repository: GenerationRepository, _request_id: object
-    ) -> bool:
+    async def request_exists(_repository: GenerationRepository, _request_id: object) -> bool:
         return True
 
     async def send(_queue: QueueClient, *_args: object, **_kwargs: object) -> str:
@@ -304,9 +355,7 @@ def test_dispatch_returns_retryable_unavailable_without_queue_credentials(
 def test_dispatch_treats_an_idempotent_queue_duplicate_as_accepted(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    async def request_exists(
-        _repository: GenerationRepository, _request_id: object
-    ) -> bool:
+    async def request_exists(_repository: GenerationRepository, _request_id: object) -> bool:
         return True
 
     async def send(_queue: QueueClient, *_args: object, **_kwargs: object) -> str:

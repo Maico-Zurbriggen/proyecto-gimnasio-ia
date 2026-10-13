@@ -1,0 +1,277 @@
+{
+  "$defs": {
+    "PrescribedSetV2": {
+      "additionalProperties": false,
+      "properties": {
+        "position": {
+          "maximum": 2147483647,
+          "minimum": 1,
+          "title": "Position",
+          "type": "integer"
+        },
+        "min_repetitions": {
+          "maximum": 2147483647,
+          "minimum": 1,
+          "title": "Min Repetitions",
+          "type": "integer"
+        },
+        "max_repetitions": {
+          "maximum": 2147483647,
+          "minimum": 1,
+          "title": "Max Repetitions",
+          "type": "integer"
+        },
+        "suggested_load": {
+          "anyOf": [
+            {
+              "maximum": 99999999.99,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Suggested Load"
+        },
+        "rest_seconds": {
+          "maximum": 2147483647,
+          "minimum": 0,
+          "title": "Rest Seconds",
+          "type": "integer"
+        },
+        "warmup": {
+          "default": false,
+          "title": "Warmup",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "position",
+        "min_repetitions",
+        "max_repetitions",
+        "rest_seconds"
+      ],
+      "title": "PrescribedSetV2",
+      "type": "object"
+    },
+    "RoutineDayV2": {
+      "additionalProperties": false,
+      "properties": {
+        "position": {
+          "maximum": 2147483647,
+          "minimum": 1,
+          "title": "Position",
+          "type": "integer"
+        },
+        "name": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "dominant_pattern": {
+          "enum": [
+            "EMPUJE_HORIZONTAL",
+            "EMPUJE_VERTICAL",
+            "TRACCION_HORIZONTAL",
+            "TRACCION_VERTICAL",
+            "DOMINANTE_RODILLA",
+            "DOMINANTE_CADERA",
+            "CORE",
+            "AISLAMIENTO_SUPERIOR",
+            "AISLAMIENTO_INFERIOR"
+          ],
+          "title": "Dominant Pattern",
+          "type": "string"
+        },
+        "exercises": {
+          "items": {
+            "$ref": "#/$defs/RoutineExerciseV2"
+          },
+          "maxItems": 500,
+          "minItems": 1,
+          "title": "Exercises",
+          "type": "array"
+        }
+      },
+      "required": [
+        "position",
+        "name",
+        "dominant_pattern",
+        "exercises"
+      ],
+      "title": "RoutineDayV2",
+      "type": "object"
+    },
+    "RoutineExerciseV2": {
+      "additionalProperties": false,
+      "properties": {
+        "position": {
+          "maximum": 2147483647,
+          "minimum": 1,
+          "title": "Position",
+          "type": "integer"
+        },
+        "exercise_id": {
+          "format": "uuid",
+          "title": "Exercise Id",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "sets": {
+          "items": {
+            "$ref": "#/$defs/PrescribedSetV2"
+          },
+          "maxItems": 500,
+          "minItems": 1,
+          "title": "Sets",
+          "type": "array"
+        }
+      },
+      "required": [
+        "position",
+        "exercise_id",
+        "sets"
+      ],
+      "title": "RoutineExerciseV2",
+      "type": "object"
+    },
+    "RoutineProposalV2": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "outcome": {
+          "const": "PROPOSED",
+          "default": "PROPOSED",
+          "title": "Outcome",
+          "type": "string"
+        },
+        "routine_type": {
+          "enum": [
+            "FUERZA",
+            "HIPERTROFIA",
+            "RESISTENCIA_MUSCULAR",
+            "ACONDICIONAMIENTO_GENERAL"
+          ],
+          "title": "Routine Type",
+          "type": "string"
+        },
+        "target_weekly_frequency": {
+          "maximum": 7,
+          "minimum": 1,
+          "title": "Target Weekly Frequency",
+          "type": "integer"
+        },
+        "days": {
+          "items": {
+            "$ref": "#/$defs/RoutineDayV2"
+          },
+          "maxItems": 7,
+          "minItems": 1,
+          "title": "Days",
+          "type": "array"
+        },
+        "explanation": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Explanation",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "routine_type",
+        "target_weekly_frequency",
+        "days",
+        "explanation",
+        "warnings"
+      ],
+      "title": "RoutineProposalV2",
+      "type": "object"
+    },
+    "RoutineUnableV2": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "outcome": {
+          "const": "UNABLE",
+          "default": "UNABLE",
+          "title": "Outcome",
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "missing_information": {
+          "items": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Missing Information",
+          "type": "array"
+        }
+      },
+      "required": [
+        "reason",
+        "missing_information"
+      ],
+      "title": "RoutineUnableV2",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "PROPOSED": "#/$defs/RoutineProposalV2",
+      "UNABLE": "#/$defs/RoutineUnableV2"
+    },
+    "propertyName": "outcome"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/RoutineProposalV2"
+    },
+    {
+      "$ref": "#/$defs/RoutineUnableV2"
+    }
+  ],
+  "$id": "urn:gym:routine-generation:2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
