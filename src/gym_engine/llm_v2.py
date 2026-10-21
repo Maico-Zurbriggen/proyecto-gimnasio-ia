@@ -625,8 +625,10 @@ async def generate_v2(
                     **(
                         {
                             "task_reminder": {
-                                REVISION_FEEDBACK_KEYS[kind]: preferences["generation_task"].get(
-                                    REVISION_FEEDBACK_KEYS[kind]
+                                REVISION_FEEDBACK_KEYS["TRAINER_REGENERATION"]: preferences[
+                                    "generation_task"
+                                ].get(
+                                    REVISION_FEEDBACK_KEYS["TRAINER_REGENERATION"]
                                 )
                             }
                         }

@@ -846,13 +846,13 @@ def test_regeneration_rejects_copy_even_if_narrative_and_series_grouping_change(
 def test_change_request_rejects_copy_and_exposes_reminder() -> None:
     entries = catalog(2)
     preferences = regeneration_preferences(entries, proposal(), kind="CHANGE_REQUEST")
-    with raises(ValueError, match="routine_regeneration_candidate_unchanged"):
+    with raises(ValueError, match="routine_change_request_unchanged"):
         validate_regeneration_candidate(
             Plan.model_validate(proposal()).expand(entries), preferences
         )
     assert generation_kind(preferences) == "CHANGE_REQUEST"
     system = generation_system(preferences, {}, retry=False)
-    assert "CAMBIOS PEDIDOS SOBRE UNA RUTINA PROPUESTA" in system
+    assert "CAMBIO PEDIDO SOBRE LA PROPUESTA" in system
     assert "change_request" in task_instruction(preferences)
 
 
