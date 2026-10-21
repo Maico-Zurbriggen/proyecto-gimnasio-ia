@@ -391,9 +391,13 @@ def validate_regeneration_candidate(
 
     Compare expanded sets: regrouping them or changing narrative fields is not a new plan.
     This does not select exercises or evaluate the training preference in code.
+    Applies to TRAINER_REGENERATION (feedback) and CHANGE_REQUEST (pedido sobre propuesta).
     """
     task = preferences.get("generation_task") or {}
-    if task.get("kind") != "TRAINER_REGENERATION" or not isinstance(output, RoutineProposalV2):
+    kind = task.get("kind")
+    if kind not in ("TRAINER_REGENERATION", "CHANGE_REQUEST") or not isinstance(
+        output, RoutineProposalV2
+    ):
         return
     previous = task.get("previous_candidate")
     if not isinstance(previous, dict) or not previous.get("days"):
@@ -431,6 +435,8 @@ def validate_regeneration_candidate(
         and output.target_weekly_frequency == previous["target_weekly_frequency"]
         and generated_days == previous_days
     ):
+        if kind == "CHANGE_REQUEST":
+            raise ValueError("routine_change_request_unchanged")
         raise ValueError("routine_regeneration_candidate_unchanged")
 
 
@@ -619,7 +625,18 @@ async def generate_v2(
                         }
                         if (preferences.get("generation_task") or {}).get("kind")
                         == "TRAINER_REGENERATION"
-                        else {}
+                        else (
+                            {
+                                "task_reminder": {
+                                    "change_request": preferences[
+                                        "generation_task"
+                                    ].get("change_request")
+                                }
+                            }
+                            if (preferences.get("generation_task") or {}).get("kind")
+                            == "CHANGE_REQUEST"
+                            else {}
+                        )
                     ),
                     **(
                         {

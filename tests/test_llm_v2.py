@@ -896,3 +896,39 @@ def test_copy_guard_only_applies_to_trainer_regeneration(kind: str) -> None:
     preferences = regeneration_preferences(entries, original)
     preferences["generation_task"]["kind"] = kind
     validate_regeneration_candidate(Plan.model_validate(original).expand(entries), preferences)
+
+
+def test_change_request_task_reaches_model(monkeypatch: MonkeyPatch) -> None:
+    entries = catalog(2)
+    original = proposal()
+    base = regeneration_preferences(entries, original)
+    previous = base['generation_task']['previous_candidate']
+    preferences = dict(base)
+    preferences['generation_task'] = {
+        'kind': 'CHANGE_REQUEST',
+        'change_request': 'Sumá un día de piernas',
+        'previous_candidate': previous,
+    }
+    seen = transport(monkeypatch, proposal(1))
+    asyncio.run(client().generate_routine({}, preferences))
+    chat = next(r for r in seen if r.url.path.endswith('/api/chat'))
+    payload = json.loads(chat.content)
+    assert 'TAREA: CAMBIO PEDIDO' in payload['messages'][0]['content']
+    user = json.loads(payload['messages'][1]['content'])
+    assert user['task_reminder']['change_request'].startswith('Sumá')
+
+
+def test_change_request_rejects_copy() -> None:
+    entries = catalog(2)
+    original = proposal()
+    base = regeneration_preferences(entries, original)
+    previous = base['generation_task']['previous_candidate']
+    preferences = dict(base)
+    preferences['generation_task'] = {
+        'kind': 'CHANGE_REQUEST',
+        'change_request': 'Sumá un día de piernas',
+        'previous_candidate': previous,
+    }
+    with raises(ValueError, match='routine_change_request_unchanged'):
+        changed = Plan.model_validate(original).expand(entries)
+        validate_regeneration_candidate(changed, preferences)
