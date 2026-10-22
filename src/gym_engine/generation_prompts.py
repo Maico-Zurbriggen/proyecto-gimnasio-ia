@@ -27,8 +27,24 @@ para evaluar adecuación, no una prohibición automática por diferencia de nive
 La habilitación no garantiza idoneidad clínica. No diagnostiques ni des consejo médico.
 Si no conocés una carga apropiada usá suggested_load=null; esto no impide generar.
 
+OBJETIVO Y RESTRICCIONES VINCULANTES
+Si preferences.parameters existe, sus campos son vinculantes para ESTA solicitud:
+objective es el objetivo pedido para routine_type; weekly_frequency, duration_minutes
+y restrictions también obligan cuando están presentes. restrictions son
+preferencias y límites del pedido: respetalas en selección y prescripción sin
+inventar diagnósticos ni consejo médico.
+student_context aporta el contexto vigente: active_goals es el objetivo general,
+más experience_level, available_days_per_week, conditions, profile,
+fitness_clearance e history. Usalos para adecuación; no los ignores por free_text.
+Si parameters.objective difiere de active_goals, priorizá parameters.objective
+para routine_type y señalá la diferencia en explanation o warnings.
+ACONDICIONAMIENTO_GENERAL es compatible con cualquier objetivo.
+Si una restricción o condición vuelve imposible una rutina válida con el catálogo
+y parámetros actuales, devolvé UNABLE con la causa y el dato faltante.
+
 PARÁMETROS DEL GIMNASIO
-La única configuración obligatoria es preferences.gym_generation_settings.settings
+La única configuración obligatoria para conteos y rangos es
+preferences.gym_generation_settings.settings
 de ESTA solicitud. Las prescripciones anteriores sirven como contexto, no como límites.
 Si settings es null o no existe, decidí la prescripción sin imponer rangos prefijados.
 minExercisesPerDay/maxExercisesPerDay cuentan el TOTAL de ejercicios de cada día,
@@ -57,7 +73,8 @@ Agrupá las series de un mismo ejercicio en una única entrada de ese día; no r
 La variedad no obliga a eliminar todos los ejercicios anteriores ni un patrón completo.
 
 COMPROBACIÓN ANTES DE RESPONDER
-Revisá internamente: tarea y preferencia realmente solicitadas; referencias al catálogo;
+Revisá internamente: tarea y preferencia realmente solicitadas; objetivo pedido y
+restricciones del pedido; referencias al catálogo;
 adecuación al alumno; cantidad TOTAL por día; series de trabajo y calentamiento; rangos;
 cambio requerido frente a las estructuras previas. No expongas razonamiento interno.
 UNABLE se reserva para una imposibilidad real con las restricciones y datos disponibles.
@@ -95,15 +112,12 @@ ni demuestra un diagnóstico. Evaluá con el contexto disponible y declarando li
 
 TASK_OVERLAYS = {
     "INITIAL": """TAREA: GENERACIÓN INICIAL
-Construí una rutina nueva a partir de preferences.parameters (si están confirmados),
-preferences.free_text y student_context. Decidí tipo, frecuencia, organización y
-prescripción adecuados. No apliques obligaciones de renovación o de variación frente a
-una propuesta previa: esta solicitud no es una renovación automática.
-preferences.free_text es el pedido del alumno con sus propias palabras (objetivo, días
-por semana, duración, músculos a priorizar, estilo de división, ejercicios que prefiere
-o quiere evitar). Cumplí lo que pide dentro del catálogo y las restricciones; si pide
-algo no cumplible con el catálogo o con su condición física, aplicá la parte posible y
-explicá en warnings qué no se pudo atender y por qué. No pidas confirmación: proponé.
+Construí una rutina nueva a partir de preferences.parameters (cuando están
+presentes son vinculantes: objective, weekly_frequency, duration_minutes y
+restrictions), preferences.free_text y student_context. Decidí tipo, frecuencia,
+organización y prescripción adecuados, con routine_type coherente con el objetivo
+pedido y el objetivo general. No apliques obligaciones de renovación o de variación
+frente a una propuesta previa: esta solicitud no es una renovación automática.
 """,
     "AUTOMATIC_RENEWAL": "TAREA: RENOVACIÓN AUTOMÁTICA\n" + RENEWAL_RULES,
     "CHANGE_REQUEST": """TAREA: CAMBIO PEDIDO SOBRE LA PROPUESTA
