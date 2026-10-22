@@ -422,6 +422,12 @@ def validate_prescription_variety(
             later < earlier for earlier, later in zip(minimums, minimums[1:], strict=False)
         ):
             raise ValueError("gym_prescription_without_progression")
+            
+REVISION_TASKS = {"TRAINER_REGENERATION", "CHANGE_REQUEST"}
+REVISION_FEEDBACK_KEYS = {
+    "TRAINER_REGENERATION": "trainer_feedback",
+    "CHANGE_REQUEST": "change_request",
+}
 
 
 def validate_regeneration_candidate(
@@ -550,7 +556,7 @@ async def generate_v2(
     wire = {
         key: value
         for key, value in preferences.items()
-        if key not in {"allowed_catalog", "local_test_regeneration"}
+        if key not in {"allowed_catalog", "local_test_regeneration", "routine_change_replacement"}
     }
     reference_indexes = {item["id"]: index for index, item in enumerate(catalog)}
     if renewal:
@@ -658,8 +664,10 @@ async def generate_v2(
                     **(
                         {
                             "task_reminder": {
-                                "trainer_feedback": preferences["generation_task"].get(
-                                    "trainer_feedback"
+                                REVISION_FEEDBACK_KEYS["TRAINER_REGENERATION"]: preferences[
+                                    "generation_task"
+                                ].get(
+                                    REVISION_FEEDBACK_KEYS["TRAINER_REGENERATION"]
                                 )
                             }
                         }

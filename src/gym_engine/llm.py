@@ -333,7 +333,8 @@ class OllamaClient:
         wire_preferences = {
             key: value
             for key, value in preferences.items()
-            if key not in {"local_test_regeneration", "allowed_catalog"}
+            if key
+            not in {"local_test_regeneration", "routine_change_replacement", "allowed_catalog"}
         }
         wire_preferences["allowed_catalog"] = [
             {"index": index, **{key: value for key, value in item.items() if key != "id"}}
