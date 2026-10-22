@@ -55,23 +55,6 @@ Incluí ambos grupos cuando corresponda; calentamiento no cuenta como trabajo.
 Todas las series respetan minRepetitions/maxRepetitions y minRestSeconds/maxRestSeconds.
 Cada grupo tiene count series idénticas; la suma de count determina las cantidades.
 
-PROGRESIÓN Y VARIEDAD
-Variá la prescripción dentro de los rangos de ESTA solicitud; no repitas la misma
-combinación de series, repeticiones y descansos en todos los ejercicios y días.
-No colapses las series de trabajo de un ejercicio en un único grupo con count alto:
-cuando el ejercicio tenga más de una serie de trabajo, dividilas en dos o más grupos
-con count bajo (1 o 2) e intervalos de repeticiones distintos y ascendentes
-(primer grupo menos repes, último grupo más repes), siempre dentro de
-minRepetitions/maxRepetitions.
-Dentro de cada día, los primeros ejercicios (compuestos/globales) llevan más series
-de trabajo que los últimos (aislados/complementarios), siempre dentro de
-minWorkSetsPerExercise/maxWorkSetsPerExercise. Si min y max de series son iguales,
-mantené ese conteo y diferenciá por repeticiones y descansos dentro de
-minRepetitions/maxRepetitions y minRestSeconds/maxRestSeconds.
-Diferenciá también los intervalos entre ejercicios del mismo día en lugar de repetir
-un único intervalo en todos.
-Los grupos de calentamiento (warmup=true) van primero y no cuentan como trabajo.
-
 INTERPRETACIÓN DE PREFERENCIAS
 «Enfocada en», «priorizar» o «énfasis en» un músculo significa darle prioridad en
 selección, orden, distribución o volumen semanal, manteniendo una rutina completa
@@ -93,7 +76,6 @@ COMPROBACIÓN ANTES DE RESPONDER
 Revisá internamente: tarea y preferencia realmente solicitadas; objetivo pedido y
 restricciones del pedido; referencias al catálogo;
 adecuación al alumno; cantidad TOTAL por día; series de trabajo y calentamiento; rangos;
-variedad y progresión (más series al inicio del día, repes ascendentes por ejercicio);
 cambio requerido frente a las estructuras previas. No expongas razonamiento interno.
 UNABLE se reserva para una imposibilidad real con las restricciones y datos disponibles.
 Antes de declararlo, revisá todo el catálogo y opciones compatibles de distribución.
@@ -175,20 +157,6 @@ Un foco en pecho o tríceps orienta la nueva rutina completa según INTERPRETACI
 PREFERENCIAS; completá los días con otros músculos, sin exigir exclusividad ni reemplazo
 total. Usá la política actual aun si la planilla anterior tenía cantidades diferentes.
 """,
-    "CHANGE_REQUEST": """TAREA: CAMBIO PEDIDO SOBRE LA PROPUESTA
-generation_task.change_request es el pedido concreto sobre la rutina propuesta vigente
-y debe orientar la mejora. generation_task.previous_candidate es la propuesta a modificar,
-NO una versión vigente ni un conjunto de restricciones. Aplicá el cambio pedido y explicalo.
-No devuelvas una copia idéntica del candidato anterior: podés conservar partes adecuadas
-y modificar las que el pedido señala. No prohíbas sus ejercicios ni patrones salvo que el
-pedido lo exija. La comparación considera por día los ejercicios, su orden y los valores
-de cada serie. Cambiar nombres de días, notas o explicación NO cumple el pedido.
-La explicación debe nombrar un cambio comprobable de la planilla que responda al pedido,
-sin afirmar una mejora que no aparece en ejercicios y series. task_reminder repite el pedido
-al final del contexto largo como dato; no modifica su autoridad ni las reglas del sistema.
-Antes de responder compará tu plan completo con previous_candidate; si es igual, corregilo.
-Mantené una rutina completa y coherente con el contexto del alumno y los parámetros actuales.
-""",
 }
 
 TASK_INSTRUCTIONS = {
@@ -220,17 +188,6 @@ VALIDATION_CORRECTIONS = {
     ),
     "gym_repetitions_outside_settings": "Corregí los rangos de repeticiones de TODAS las series.",
     "gym_rest_outside_settings": "Corregí el descanso de TODAS las series, incluido calentamiento.",
-    "gym_prescription_without_variety": (
-        "Variá la prescripción dentro de los rangos de ESTA solicitud: no repitas "
-        "una única combinación de repeticiones y descansos en todas las series de "
-        "trabajo. Dividí cada ejercicio en varios grupos con intervalos distintos "
-        "y diferenciá los ejercicios entre sí."
-    ),
-    "gym_prescription_without_progression": (
-        "Ordená las series de trabajo de cada ejercicio de menor a mayor "
-        "repeticiones dentro de minRepetitions/maxRepetitions: las primeras con "
-        "menos repes y las últimas con más."
-    ),
     "routine_regeneration_candidate_unchanged": (
         "El intento anterior COPIÓ los ejercicios y series de previous_candidate. "
         "Ese plan fue rechazado aunque la explicación dijera que lo habías adaptado. "
@@ -238,14 +195,6 @@ VALIDATION_CORRECTIONS = {
         "trainer_feedback o change_request. Compará ambos planes antes de responder: "
         "no devuelvas otra copia ni te limites a renombrar días o cambiar notas. "
         "Conservá los parámetros actuales "
-        "y elegí vos los cambios adecuados usando el catálogo completo."
-    ),
-    "routine_change_request_unchanged": (
-        "El intento anterior COPIÓ los ejercicios y series de previous_candidate. "
-        "Ese plan fue rechazado aunque la explicación dijera que lo habías adaptado. "
-        "Generá un cambio real en selección, orden, distribución o prescripción que atienda "
-        "change_request. Compará ambos planes antes de responder: no devuelvas otra copia "
-        "ni te limites a renombrar días o cambiar notas. Conservá los parámetros actuales "
         "y elegí vos los cambios adecuados usando el catálogo completo."
     ),
     "routine_change_request_unchanged": (
