@@ -17,6 +17,7 @@ from gym_engine.llm_v2 import (
     Plan,
     RenewalPlan,
     validate_gym_settings,
+    validate_prescription_variety,
     validate_regeneration_candidate,
     validate_renewal_distribution,
 )
@@ -643,6 +644,91 @@ def test_gym_parameters_are_validated_after_expanding_sets(
         )
 
 
+def uniform_two_exercise_proposal() -> dict[str, Any]:
+    value = proposal()
+    day = value["days"][0]
+    day["exercises"] = [
+        {**day["exercises"][0], "index": 0},
+        {
+            **day["exercises"][0],
+            "index": 1,
+            "groups": [dict(day["exercises"][0]["groups"][0])],
+        },
+    ]
+    return value
+
+
+def test_fully_uniform_prescription_is_rejected_when_ranges_allow_variation() -> None:
+    output = Plan.model_validate(uniform_two_exercise_proposal()).expand(catalog(2))
+    with raises(ValueError, match="gym_prescription_without_variety"):
+        validate_prescription_variety(
+            output, {"gym_generation_settings": {"settings": GYM_POLICY}}
+        )
+
+
+def test_uniform_prescription_passes_when_gym_fixes_single_values() -> None:
+    output = Plan.model_validate(uniform_two_exercise_proposal()).expand(catalog(2))
+    fixed = {**GYM_POLICY, "maxRepetitions": 1, "maxRestSeconds": 900}
+    validate_prescription_variety(output, {"gym_generation_settings": {"settings": fixed}})
+
+
+def test_varied_prescription_passes() -> None:
+    value = uniform_two_exercise_proposal()
+    groups = value["days"][0]["exercises"][1]["groups"]
+    groups[0] = {**groups[0], "min_repetitions": 2, "max_repetitions": 2}
+    output = Plan.model_validate(value).expand(catalog(2))
+    validate_prescription_variety(
+        output, {"gym_generation_settings": {"settings": GYM_POLICY}}
+    )
+
+
+def test_descending_work_sets_are_rejected() -> None:
+    value = proposal()
+    value["days"][0]["exercises"][0]["groups"] = [
+        {
+            "count": 1,
+            "min_repetitions": 2,
+            "max_repetitions": 2,
+            "rest_seconds": 900,
+            "suggested_load": None,
+            "warmup": False,
+        },
+        {
+            "count": 1,
+            "min_repetitions": 1,
+            "max_repetitions": 1,
+            "rest_seconds": 900,
+            "suggested_load": None,
+            "warmup": False,
+        },
+    ]
+    output = Plan.model_validate(value).expand(catalog(1))
+    with raises(ValueError, match="gym_prescription_without_progression"):
+        validate_prescription_variety(
+            output, {"gym_generation_settings": {"settings": GYM_POLICY}}
+        )
+
+
+def test_uniform_model_output_is_rejected_before_completion(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    entries = catalog(2)
+    seen = transport(monkeypatch, uniform_two_exercise_proposal())
+    settings = {**GYM_POLICY, "maxExercisesPerDay": 2}
+    with raises(ValueError, match="gym_prescription_without_variety"):
+        asyncio.run(
+            client().generate_routine(
+                {},
+                {
+                    "schema_version": "2.0",
+                    "allowed_catalog": entries,
+                    "gym_generation_settings": {"settings": settings},
+                },
+            )
+        )
+    assert any(request.url.path.endswith("/api/chat") for request in seen)
+
+
 @mark.parametrize("kind", ["INITIAL", "AUTOMATIC_RENEWAL", "TRAINER_REGENERATION"])
 def test_chest_emphasis_keeps_full_catalog_and_counts_total_daily_exercises(
     monkeypatch: MonkeyPatch, kind: str
@@ -655,9 +741,23 @@ def test_chest_emphasis_keeps_full_catalog_and_counts_total_daily_exercises(
     )
     entries[1].update(name="Aperturas de pecho", primary_muscles=["PECTORAL"])
     # Two chest exercises and three complements satisfy five TOTAL exercises.
+    # Vary intervals per exercise: the new variety check rejects a fully uniform plan.
     value = proposal()
+    base = value["days"][0]["exercises"][0]
     value["days"][0]["exercises"] = [
-        {**value["days"][0]["exercises"][0], "index": index} for index in range(5)
+        {
+            **base,
+            "index": index,
+            "groups": [
+                {
+                    **base["groups"][0],
+                    "min_repetitions": 1 + (index % 2),
+                    "max_repetitions": 2,
+                    "rest_seconds": 900 + (index % 2) * 100,
+                }
+            ],
+        }
+        for index in range(5)
     ]
     seen = transport(monkeypatch, value)
     task: dict[str, Any] = {"kind": kind}

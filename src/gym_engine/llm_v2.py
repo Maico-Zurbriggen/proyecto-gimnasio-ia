@@ -384,6 +384,46 @@ def validate_gym_settings(
                     raise ValueError("gym_rest_outside_settings")
 
 
+def validate_prescription_variety(
+    output: RoutineProposalV2 | RoutineUnableV2, preferences: dict[str, Any]
+) -> None:
+    """Reject a fully uniform prescription so the durable retry can diversify it.
+
+    This does not choose values: the model still decides every interval within
+    the gym ranges. It only rejects the degenerate case where every work set
+    shares one identical combination while the ranges allow variation, and work
+    sets ordered against the requested ascending progression within an exercise.
+    Single-value gym settings are unaffected.
+    """
+    if not isinstance(output, RoutineProposalV2):
+        return
+    settings = (preferences.get("gym_generation_settings") or {}).get("settings")
+    if not settings:
+        return
+    reps_can_vary = settings["maxRepetitions"] > settings["minRepetitions"]
+    rest_can_vary = settings["maxRestSeconds"] > settings["minRestSeconds"]
+    if not (reps_can_vary or rest_can_vary):
+        return
+    work_by_exercise: list[list[tuple[int, int, int]]] = [
+        [
+            (item.min_repetitions, item.max_repetitions, item.rest_seconds)
+            for item in exercise.sets
+            if not item.warmup
+        ]
+        for day in output.days
+        for exercise in day.exercises
+    ]
+    work_sets = [item for exercise in work_by_exercise for item in exercise]
+    if len(work_sets) > 1 and len(set(work_sets)) == 1:
+        raise ValueError("gym_prescription_without_variety")
+    for exercise_sets in work_by_exercise:
+        minimums = [item[0] for item in exercise_sets]
+        if any(
+            later < earlier for earlier, later in zip(minimums, minimums[1:], strict=False)
+        ):
+            raise ValueError("gym_prescription_without_progression")
+
+
 def validate_regeneration_candidate(
     output: RoutineProposalV2 | RoutineUnableV2, preferences: dict[str, Any]
 ) -> None:
@@ -763,6 +803,7 @@ async def generate_v2(
         plan = Plan.model_validate_json("".join(parts))
         output = plan.expand(catalog)
         validate_gym_settings(output, preferences)
+        validate_prescription_variety(output, preferences)
         validate_regeneration_candidate(output, preferences)
         if preferences.get("routine_renewal_full_catalog"):
             validate_renewal_distribution(plan, preferences)

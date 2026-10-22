@@ -27,8 +27,24 @@ para evaluar adecuación, no una prohibición automática por diferencia de nive
 La habilitación no garantiza idoneidad clínica. No diagnostiques ni des consejo médico.
 Si no conocés una carga apropiada usá suggested_load=null; esto no impide generar.
 
+OBJETIVO Y RESTRICCIONES VINCULANTES
+Si preferences.parameters existe, sus campos son vinculantes para ESTA solicitud:
+objective es el objetivo pedido para routine_type; weekly_frequency, duration_minutes
+y restrictions también obligan cuando están presentes. restrictions son
+preferencias y límites del pedido: respetalas en selección y prescripción sin
+inventar diagnósticos ni consejo médico.
+student_context aporta el contexto vigente: active_goals es el objetivo general,
+más experience_level, available_days_per_week, conditions, profile,
+fitness_clearance e history. Usalos para adecuación; no los ignores por free_text.
+Si parameters.objective difiere de active_goals, priorizá parameters.objective
+para routine_type y señalá la diferencia en explanation o warnings.
+ACONDICIONAMIENTO_GENERAL es compatible con cualquier objetivo.
+Si una restricción o condición vuelve imposible una rutina válida con el catálogo
+y parámetros actuales, devolvé UNABLE con la causa y el dato faltante.
+
 PARÁMETROS DEL GIMNASIO
-La única configuración obligatoria es preferences.gym_generation_settings.settings
+La única configuración obligatoria para conteos y rangos es
+preferences.gym_generation_settings.settings
 de ESTA solicitud. Las prescripciones anteriores sirven como contexto, no como límites.
 Si settings es null o no existe, decidí la prescripción sin imponer rangos prefijados.
 minExercisesPerDay/maxExercisesPerDay cuentan el TOTAL de ejercicios de cada día,
@@ -38,6 +54,23 @@ por ejercicio. warmupSetsPerExercise indica series ADICIONALES exactas (warmup=t
 Incluí ambos grupos cuando corresponda; calentamiento no cuenta como trabajo.
 Todas las series respetan minRepetitions/maxRepetitions y minRestSeconds/maxRestSeconds.
 Cada grupo tiene count series idénticas; la suma de count determina las cantidades.
+
+PROGRESIÓN Y VARIEDAD
+Variá la prescripción dentro de los rangos de ESTA solicitud; no repitas la misma
+combinación de series, repeticiones y descansos en todos los ejercicios y días.
+No colapses las series de trabajo de un ejercicio en un único grupo con count alto:
+cuando el ejercicio tenga más de una serie de trabajo, dividilas en dos o más grupos
+con count bajo (1 o 2) e intervalos de repeticiones distintos y ascendentes
+(primer grupo menos repes, último grupo más repes), siempre dentro de
+minRepetitions/maxRepetitions.
+Dentro de cada día, los primeros ejercicios (compuestos/globales) llevan más series
+de trabajo que los últimos (aislados/complementarios), siempre dentro de
+minWorkSetsPerExercise/maxWorkSetsPerExercise. Si min y max de series son iguales,
+mantené ese conteo y diferenciá por repeticiones y descansos dentro de
+minRepetitions/maxRepetitions y minRestSeconds/maxRestSeconds.
+Diferenciá también los intervalos entre ejercicios del mismo día en lugar de repetir
+un único intervalo en todos.
+Los grupos de calentamiento (warmup=true) van primero y no cuentan como trabajo.
 
 INTERPRETACIÓN DE PREFERENCIAS
 «Enfocada en», «priorizar» o «énfasis en» un músculo significa darle prioridad en
@@ -57,8 +90,10 @@ Agrupá las series de un mismo ejercicio en una única entrada de ese día; no r
 La variedad no obliga a eliminar todos los ejercicios anteriores ni un patrón completo.
 
 COMPROBACIÓN ANTES DE RESPONDER
-Revisá internamente: tarea y preferencia realmente solicitadas; referencias al catálogo;
+Revisá internamente: tarea y preferencia realmente solicitadas; objetivo pedido y
+restricciones del pedido; referencias al catálogo;
 adecuación al alumno; cantidad TOTAL por día; series de trabajo y calentamiento; rangos;
+variedad y progresión (más series al inicio del día, repes ascendentes por ejercicio);
 cambio requerido frente a las estructuras previas. No expongas razonamiento interno.
 UNABLE se reserva para una imposibilidad real con las restricciones y datos disponibles.
 Antes de declararlo, revisá todo el catálogo y opciones compatibles de distribución.
@@ -95,10 +130,12 @@ ni demuestra un diagnóstico. Evaluá con el contexto disponible y declarando li
 
 TASK_OVERLAYS = {
     "INITIAL": """TAREA: GENERACIÓN INICIAL
-Construí una rutina nueva a partir de preferences.parameters (si están confirmados),
-preferences.free_text y student_context. Decidí tipo, frecuencia, organización y
-prescripción adecuados. No apliques obligaciones de renovación o de variación frente a
-una propuesta previa: esta solicitud no es una renovación automática.
+Construí una rutina nueva a partir de preferences.parameters (cuando están
+presentes son vinculantes: objective, weekly_frequency, duration_minutes y
+restrictions), preferences.free_text y student_context. Decidí tipo, frecuencia,
+organización y prescripción adecuados, con routine_type coherente con el objetivo
+pedido y el objetivo general. No apliques obligaciones de renovación o de variación
+frente a una propuesta previa: esta solicitud no es una renovación automática.
 """,
     "AUTOMATIC_RENEWAL": "TAREA: RENOVACIÓN AUTOMÁTICA\n" + RENEWAL_RULES,
     "TRAINER_REGENERATION": "TAREA: REGENERACIÓN PEDIDA POR ENTRENADOR\n"
@@ -169,6 +206,17 @@ VALIDATION_CORRECTIONS = {
     ),
     "gym_repetitions_outside_settings": "Corregí los rangos de repeticiones de TODAS las series.",
     "gym_rest_outside_settings": "Corregí el descanso de TODAS las series, incluido calentamiento.",
+    "gym_prescription_without_variety": (
+        "Variá la prescripción dentro de los rangos de ESTA solicitud: no repitas "
+        "una única combinación de repeticiones y descansos en todas las series de "
+        "trabajo. Dividí cada ejercicio en varios grupos con intervalos distintos "
+        "y diferenciá los ejercicios entre sí."
+    ),
+    "gym_prescription_without_progression": (
+        "Ordená las series de trabajo de cada ejercicio de menor a mayor "
+        "repeticiones dentro de minRepetitions/maxRepetitions: las primeras con "
+        "menos repes y las últimas con más."
+    ),
     "routine_regeneration_candidate_unchanged": (
         "El intento anterior COPIÓ los ejercicios y series de previous_candidate. "
         "Ese plan fue rechazado aunque la explicación dijera que lo habías adaptado. "
