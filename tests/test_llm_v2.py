@@ -11,6 +11,7 @@ from pytest import MonkeyPatch, mark, raises
 from test_token_budget import tokenizer_metadata
 
 from gym_engine import token_budget
+from gym_engine.generation_prompts import generation_kind, generation_system, task_instruction
 from gym_engine.llm import OllamaClient
 from gym_engine.llm_v2 import (
     ContextCapacityError,
@@ -789,7 +790,7 @@ def test_warmup_groups_are_explicit_and_policy_retry_receives_the_specific_failu
 
 
 def regeneration_preferences(
-    entries: list[dict[str, Any]], value: dict[str, Any]
+    entries: list[dict[str, Any]], value: dict[str, Any], kind: str = "TRAINER_REGENERATION"
 ) -> dict[str, Any]:
     expanded = Plan.model_validate(value).expand(entries).model_dump(mode="json")
     indexes = {entry["id"]: index for index, entry in enumerate(entries)}
@@ -798,8 +799,10 @@ def regeneration_preferences(
         "schema_version": "2.0",
         "allowed_catalog": entries,
         "generation_task": {
-            "kind": "TRAINER_REGENERATION",
-            "trainer_feedback": "Enfoque en glúteos",
+            "kind": kind,
+            "trainer_feedback" if kind == "TRAINER_REGENERATION" else "change_request": (
+                "Enfoque en glúteos"
+            ),
             "previous_candidate": {
                 "routine_type": expanded["routine_type"],
                 "target_weekly_frequency": expanded["target_weekly_frequency"],
@@ -838,6 +841,19 @@ def test_regeneration_rejects_copy_even_if_narrative_and_series_grouping_change(
     exercise["groups"] *= 2  # Same two sets, expressed as separate compact groups.
     with raises(ValueError, match="routine_regeneration_candidate_unchanged"):
         validate_regeneration_candidate(Plan.model_validate(copy).expand(entries), preferences)
+
+
+def test_change_request_rejects_copy_and_exposes_reminder() -> None:
+    entries = catalog(2)
+    preferences = regeneration_preferences(entries, proposal(), kind="CHANGE_REQUEST")
+    with raises(ValueError, match="routine_change_request_unchanged"):
+        validate_regeneration_candidate(
+            Plan.model_validate(proposal()).expand(entries), preferences
+        )
+    assert generation_kind(preferences) == "CHANGE_REQUEST"
+    system = generation_system(preferences, {}, retry=False)
+    assert "CAMBIO PEDIDO SOBRE LA PROPUESTA" in system
+    assert "change_request" in task_instruction(preferences)
 
 
 @mark.parametrize("change", ["exercise", "order", "prescription"])
@@ -896,3 +912,39 @@ def test_copy_guard_only_applies_to_trainer_regeneration(kind: str) -> None:
     preferences = regeneration_preferences(entries, original)
     preferences["generation_task"]["kind"] = kind
     validate_regeneration_candidate(Plan.model_validate(original).expand(entries), preferences)
+
+
+def test_change_request_task_reaches_model(monkeypatch: MonkeyPatch) -> None:
+    entries = catalog(2)
+    original = proposal()
+    base = regeneration_preferences(entries, original)
+    previous = base['generation_task']['previous_candidate']
+    preferences = dict(base)
+    preferences['generation_task'] = {
+        'kind': 'CHANGE_REQUEST',
+        'change_request': 'Sumá un día de piernas',
+        'previous_candidate': previous,
+    }
+    seen = transport(monkeypatch, proposal(1))
+    asyncio.run(client().generate_routine({}, preferences))
+    chat = next(r for r in seen if r.url.path.endswith('/api/chat'))
+    payload = json.loads(chat.content)
+    assert 'TAREA: CAMBIO PEDIDO' in payload['messages'][0]['content']
+    user = json.loads(payload['messages'][1]['content'])
+    assert user['task_reminder']['change_request'].startswith('Sumá')
+
+
+def test_change_request_rejects_copy() -> None:
+    entries = catalog(2)
+    original = proposal()
+    base = regeneration_preferences(entries, original)
+    previous = base['generation_task']['previous_candidate']
+    preferences = dict(base)
+    preferences['generation_task'] = {
+        'kind': 'CHANGE_REQUEST',
+        'change_request': 'Sumá un día de piernas',
+        'previous_candidate': previous,
+    }
+    with raises(ValueError, match='routine_change_request_unchanged'):
+        changed = Plan.model_validate(original).expand(entries)
+        validate_regeneration_candidate(changed, preferences)

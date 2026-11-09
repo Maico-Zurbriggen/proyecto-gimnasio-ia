@@ -384,6 +384,13 @@ def validate_gym_settings(
                     raise ValueError("gym_rest_outside_settings")
 
 
+REVISION_TASKS = {"TRAINER_REGENERATION", "CHANGE_REQUEST"}
+REVISION_FEEDBACK_KEYS = {
+    "TRAINER_REGENERATION": "trainer_feedback",
+    "CHANGE_REQUEST": "change_request",
+}
+
+
 def validate_regeneration_candidate(
     output: RoutineProposalV2 | RoutineUnableV2, preferences: dict[str, Any]
 ) -> None:
@@ -391,9 +398,13 @@ def validate_regeneration_candidate(
 
     Compare expanded sets: regrouping them or changing narrative fields is not a new plan.
     This does not select exercises or evaluate the training preference in code.
+    Applies to TRAINER_REGENERATION (feedback) and CHANGE_REQUEST (pedido sobre propuesta).
     """
     task = preferences.get("generation_task") or {}
-    if task.get("kind") != "TRAINER_REGENERATION" or not isinstance(output, RoutineProposalV2):
+    kind = task.get("kind")
+    if kind not in ("TRAINER_REGENERATION", "CHANGE_REQUEST") or not isinstance(
+        output, RoutineProposalV2
+    ):
         return
     previous = task.get("previous_candidate")
     if not isinstance(previous, dict) or not previous.get("days"):
@@ -431,6 +442,8 @@ def validate_regeneration_candidate(
         and output.target_weekly_frequency == previous["target_weekly_frequency"]
         and generated_days == previous_days
     ):
+        if kind == "CHANGE_REQUEST":
+            raise ValueError("routine_change_request_unchanged")
         raise ValueError("routine_regeneration_candidate_unchanged")
 
 
@@ -504,7 +517,7 @@ async def generate_v2(
     wire = {
         key: value
         for key, value in preferences.items()
-        if key not in {"allowed_catalog", "local_test_regeneration"}
+        if key not in {"allowed_catalog", "local_test_regeneration", "routine_change_replacement"}
     }
     reference_indexes = {item["id"]: index for index, item in enumerate(catalog)}
     if renewal:
@@ -612,14 +625,27 @@ async def generate_v2(
                     **(
                         {
                             "task_reminder": {
-                                "trainer_feedback": preferences["generation_task"].get(
-                                    "trainer_feedback"
+                                REVISION_FEEDBACK_KEYS["TRAINER_REGENERATION"]: preferences[
+                                    "generation_task"
+                                ].get(
+                                    REVISION_FEEDBACK_KEYS["TRAINER_REGENERATION"]
                                 )
                             }
                         }
                         if (preferences.get("generation_task") or {}).get("kind")
                         == "TRAINER_REGENERATION"
-                        else {}
+                        else (
+                            {
+                                "task_reminder": {
+                                    "change_request": preferences[
+                                        "generation_task"
+                                    ].get("change_request")
+                                }
+                            }
+                            if (preferences.get("generation_task") or {}).get("kind")
+                            == "CHANGE_REQUEST"
+                            else {}
+                        )
                     ),
                     **(
                         {
