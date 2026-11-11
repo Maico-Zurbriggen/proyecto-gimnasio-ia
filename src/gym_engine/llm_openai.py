@@ -47,7 +47,12 @@ async def openai_chat_json(
         ) as client,
     ):
         response = await client.post(f"{base_url}/responses", json=payload)
-        response.raise_for_status()
+        if response.is_error:
+            detail = (response.json().get("error") or {}) if response.content else {}
+            raise ValueError(
+                f"OpenAI HTTP {response.status_code}: {detail.get('code')} "
+                f"param={detail.get('param')} {str(detail.get('message'))[:80]}"
+            )
         body = response.json()
     if body.get("error"):
         raise ValueError("LLM reported an inference error")
