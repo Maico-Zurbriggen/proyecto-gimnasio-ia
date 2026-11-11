@@ -375,7 +375,7 @@ class OllamaClient:
                 "required_pattern_groups", []
             )
         ]
-        payload = {
+        payload: dict[str, Any] = {
             "model": self._model,
             "stream": True,
             "think": False,
