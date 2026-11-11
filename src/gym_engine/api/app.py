@@ -165,6 +165,7 @@ def create_app() -> FastAPI:
                 settings.llm_model,
                 settings.llm_api_token,
                 settings.timeout_seconds,
+                provider=settings.llm_provider,
             ).ping()
         except Exception as error:
             logger.warning("Readiness check failed for LLM (%s)", type(error).__name__)

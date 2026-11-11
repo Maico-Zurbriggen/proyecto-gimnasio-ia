@@ -37,6 +37,7 @@ class Settings:
     max_attempts: int
     context_tokens: int = 131072
     response_tokens: int = 8192
+    llm_provider: str = "ollama"
 
     def __post_init__(self) -> None:
         if (
@@ -72,15 +73,25 @@ class Settings:
             "::1",
         }:
             raise ConfigurationError("APP_ENV=local requires a local PostgreSQL database")
+        provider = os.getenv("LLM_PROVIDER", "ollama").strip().lower()
+        if provider not in {"ollama", "openai"}:
+            raise ConfigurationError("LLM_PROVIDER must be either 'ollama' or 'openai'")
+        if provider == "openai":
+            api_url = os.getenv("LLM_API_URL", "").strip() or "https://api.openai.com/v1"
+            api_token = os.getenv("OPENAI_API_KEY", "").strip() or _required("LLM_API_TOKEN")
+        else:
+            api_url = _required("LLM_API_URL")
+            api_token = _required("LLM_API_TOKEN")
         return cls(
             app_env=app_env,
             database_url=database_url,
             api_key=_required("AI_SERVICE_API_KEY"),
             generation_queue_mode=generation_queue_mode,
             queue_region=os.getenv("QUEUE_REGION", "gru1").strip(),
-            llm_api_url=_required("LLM_API_URL").rstrip("/"),
+            llm_api_url=api_url.rstrip("/"),
             llm_model=_required("LLM_MODEL"),
-            llm_api_token=_required("LLM_API_TOKEN"),
+            llm_api_token=api_token,
+            llm_provider=provider,
             configuration_version=os.getenv(
                 "LLM_CONFIGURATION_VERSION", "generative/generar-rutina@26"
             ).strip(),
