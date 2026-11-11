@@ -20,6 +20,7 @@ from .contracts import (
     RoutineUnableV2,
     TrainingPurpose,
 )
+from .llm_openai import openai_chat_json, openai_headers, openai_ping
 from .llm_schema import build_native_generation_schema
 from .llm_v2 import generate_v2
 
@@ -277,18 +278,27 @@ class OllamaClient:
         timeout_seconds: int,
         context_tokens: int = 32768,
         response_tokens: int = 4096,
+        provider: str = "ollama",
     ) -> None:
         self._base_url = base_url
         self._model = model
-        self._headers = {
-            "Authorization": f"Bearer {api_token}",
-            "ngrok-skip-browser-warning": "1",
-        }
+        self._provider = provider
+        self._headers = (
+            openai_headers(api_token)
+            if provider == "openai"
+            else {
+                "Authorization": f"Bearer {api_token}",
+                "ngrok-skip-browser-warning": "1",
+            }
+        )
         self._timeout = timeout_seconds
         self._context_tokens = context_tokens
         self._response_tokens = response_tokens
 
     async def ping(self) -> None:
+        if self._provider == "openai":
+            await openai_ping(self._base_url, self._model, self._headers)
+            return
         async with httpx.AsyncClient(
             headers=self._headers, timeout=10, follow_redirects=False
         ) as client:
@@ -321,6 +331,7 @@ class OllamaClient:
                 preferences=preferences,
                 retry=retry,
                 validation_feedback=validation_feedback,
+                provider=self._provider,
             )
             return LlmResult(output=output, output_hash=output_hash, model_version=model)
         output_schema = CompactRoutinePlan.model_json_schema()
@@ -447,6 +458,19 @@ class OllamaClient:
             ],
             "options": {"temperature": 0.2, "num_ctx": 8192},
         }
+        if self._provider == "openai":
+            raw_content, model_version = await openai_chat_json(
+                base_url=self._base_url,
+                model=self._model,
+                headers=self._headers,
+                timeout=self._timeout,
+                messages=payload["messages"],
+                schema=payload["format"],
+                response_tokens=self._response_tokens,
+            )
+            return self._finish_v1(
+                raw_content, model_version, catalog, minimized_context, preferences
+            )
         content_parts: list[str] = []
         model_version = self._model
         done = False
@@ -474,6 +498,16 @@ class OllamaClient:
         if not done:
             raise ValueError("LLM response ended before generation completed")
         raw_content = "".join(content_parts)
+        return self._finish_v1(raw_content, model_version, catalog, minimized_context, preferences)
+
+    @staticmethod
+    def _finish_v1(
+        raw_content: str,
+        model_version: str,
+        catalog: list[dict[str, Any]],
+        minimized_context: dict[str, Any],
+        preferences: dict[str, Any],
+    ) -> LlmResult:
         plan = CompactRoutinePlan.model_validate_json(raw_content).to_plan(catalog)
         plan.validate_prescription(minimized_context, preferences)
         parsed = plan.to_output()

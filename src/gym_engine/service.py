@@ -45,6 +45,7 @@ async def process_generation(request_id: UUID, settings: Settings) -> None:
         timeout_seconds=settings.timeout_seconds,
         context_tokens=settings.context_tokens,
         response_tokens=settings.response_tokens,
+        provider=settings.llm_provider,
     )
     try:
         result = await client.generate_routine(

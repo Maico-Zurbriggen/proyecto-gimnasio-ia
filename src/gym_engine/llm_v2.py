@@ -34,6 +34,7 @@ from .generation_prompts import (
     generation_system,
     task_instruction,
 )
+from .llm_openai import openai_chat_json
 from .token_budget import (
     TOKEN_BUDGET_VERSION,
     cache_tokenizer,
@@ -459,6 +460,7 @@ async def generate_v2(
     preferences: dict[str, Any],
     retry: bool,
     validation_feedback: str | None = None,
+    provider: str = "ollama",
 ) -> tuple[RoutineProposalV2 | RoutineUnableV2, str, str]:
     catalog: list[dict[str, Any]] = preferences.get("allowed_catalog", [])
     if not catalog:
@@ -677,6 +679,32 @@ async def generate_v2(
     )
     if response_tokens + 2048 >= context_tokens:
         raise ContextCapacityError("context_capacity_exceeded")
+    if provider == "openai":
+        content, returned_model = await openai_chat_json(
+            base_url=base_url,
+            model=model,
+            headers=headers,
+            timeout=timeout,
+            messages=messages,
+            schema=schema,
+            response_tokens=response_tokens,
+        )
+        if renewal:
+            output = RenewalPlan.model_validate_json(content).expand(structure, catalog)
+        else:
+            plan = Plan.model_validate_json(content)
+            output = plan.expand(catalog)
+            validate_gym_settings(output, preferences)
+            validate_regeneration_candidate(output, preferences)
+            if preferences.get("routine_renewal_full_catalog"):
+                validate_renewal_distribution(plan, preferences)
+        canonical = json.dumps(
+            output.model_dump(mode="json"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        return output, hashlib.sha256(canonical).hexdigest(), returned_model
     payload = {
         "model": model,
         "stream": True,
